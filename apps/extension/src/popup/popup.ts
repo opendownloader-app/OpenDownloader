@@ -38,6 +38,14 @@ const audioOnlyEl = document.getElementById("audio-only") as HTMLInputElement;
 const selected = new Set<string>();
 let candidates: DetectedItem[] = [];
 
+/**
+ * The current tab's title, remembered when the popup loads.
+ *
+ * Read once rather than per render: it names both the joined card and the file the job
+ * saves as, and those two must not be able to disagree.
+ */
+let pageTitle: string | null = null;
+
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
   return tab;
@@ -73,14 +81,14 @@ async function queue(items: DetectedItem[]): Promise<void> {
 }
 
 /**
- * Offer the newest video track joined to the newest audio track.
+ * The newest video track and the newest audio track, when the page has both.
  *
  * Newest of each rather than every combination: a feed page describes several videos, and
- * the one being watched is the one whose tracks were fetched last. That is a heuristic
- * and is labelled as a pairing rather than presented as the site's own rendition, so a
- * wrong guess is visible instead of silent.
+ * the one being watched is the one whose tracks were fetched last.
  */
-async function offerJoinedPair(items: DetectedItem[]): Promise<void> {
+async function findJoinablePair(
+  items: DetectedItem[],
+): Promise<{ video: DetectedItem; audio: DetectedItem } | null> {
   const kinds = await Promise.all(
     items.map((i) => trackKind(i.url, i.mime ?? null)),
   );
@@ -92,32 +100,61 @@ async function offerJoinedPair(items: DetectedItem[]): Promise<void> {
   };
   const video = newest("video");
   const audio = newest("audio");
-  if (!video || !audio) return;
+  return video && audio ? { video, audio } : null;
+}
 
+/** The joined pair, rendered as the page's one answer. */
+function joinedCard(pair: {
+  video: DetectedItem;
+  audio: DetectedItem;
+}): HTMLElement {
   const card = document.createElement("div");
-  card.className = "card item row";
-  const text = document.createElement("div");
-  text.className = "grow";
-  const top = document.createElement("div");
-  top.textContent = "Video + audio, joined here";
-  const bottom = document.createElement("div");
-  bottom.className = "muted";
-  bottom.textContent =
-    "This site sends the picture and the sound separately. Either one alone is not a " +
-    "watchable file; this downloads both and joins them.";
-  text.append(top, bottom);
+  card.className = "card item stack";
 
-  const button = document.createElement("button");
-  button.className = "primary";
-  button.textContent = "Download";
-  button.addEventListener("click", () => {
-    button.disabled = true;
-    button.textContent = "Queued";
-    void queueJoined(video, audio);
+  const title = document.createElement("div");
+  title.className = "row";
+  const name = document.createElement("div");
+  name.className = "grow truncate";
+  // The page's title, not either track's filename: both are opaque CDN ids, and the
+  // title is what the file will be saved as.
+  name.textContent = pageTitle ?? "This video";
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.textContent = "video";
+  title.append(name, badge);
+
+  const meta = document.createElement("div");
+  meta.className = "muted";
+  // No size, deliberately. What the listener saw is the chunk the player asked for, not
+  // the file: on the reel this was built against those chunks totalled 11 KB while the
+  // real tracks were 364 MB and 56 MB. A number that wrong is worse than no number —
+  // someone sizes a download by it and is misled by three orders of magnitude.
+  meta.textContent =
+    "picture and sound arrive separately here; both are downloaded and joined";
+
+  const action = document.createElement("button");
+  action.className = "primary";
+  action.textContent = "Download";
+  action.addEventListener("click", () => {
+    action.disabled = true;
+    action.textContent = "Queued";
+    void queueJoined(pair.video, pair.audio);
   });
-  card.append(text, button);
-  // First, above the individual tracks.
-  listEl.prepend(card);
+
+  card.append(title, meta, action);
+  return card;
+}
+
+/** A page title turned into a filename, or null when there is nothing usable in it. */
+function safeFilename(title: string | undefined): string | null {
+  if (!title) return null;
+  const cleaned = title
+    .replace(/[/\\:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120)
+    .trim();
+  return cleaned ? `${cleaned}.mp4` : null;
 }
 
 /** Queue the pair as one merge job, which is the shape the engine already downloads. */
@@ -126,6 +163,10 @@ async function queueJoined(
   audio: DetectedItem,
 ): Promise<void> {
   const now = Date.now();
+  // The tab's own title, because neither track carries one: these URLs are opaque ids on
+  // a CDN, and "video.mp4" for every download from every site is a folder nobody can
+  // read later.
+  const filename = safeFilename(pageTitle ?? undefined) ?? "video.mp4";
   const stream = (
     item: DetectedItem,
     kind: "videoonly" | "audioonly",
@@ -143,7 +184,7 @@ async function queueJoined(
     id: jobIdFor(`${video.url}|${audio.url}`),
     // A merge reads its two streams from `mergeStreams`; `url` is only for display.
     url: video.pageUrl ?? video.url,
-    filename: "video.mp4",
+    filename,
     kind: "merge",
     status: "queued",
     stateJson: "",
@@ -161,7 +202,7 @@ async function queueJoined(
   window.close();
 }
 
-function renderCandidates(items: DetectedItem[]): void {
+async function renderCandidates(items: DetectedItem[]): Promise<void> {
   candidates = items;
   for (const url of [...selected]) {
     if (!items.some((i) => i.url === url)) selected.delete(url);
@@ -169,15 +210,28 @@ function renderCandidates(items: DetectedItem[]): void {
 
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
-  batchEl.hidden = items.length < 2;
 
   // Sites that stream through MSE send the picture and the sound as two files, and the
   // listener sees two unrelated downloads. Saving either alone gives a file that
-  // disappoints — silent video, or audio that will not open as a movie — so when both
-  // are present the joined pair is offered first, as the thing most people came for.
-  void offerJoinedPair(items);
+  // disappoints: silent video, or audio that will not open as a movie.
+  //
+  // So when both are present the joined pair *is* the answer, and it is rendered as the
+  // one thing on offer. The tracks it is made of, and whatever else the page fetched,
+  // go under a fold — listing them alongside turns one obvious choice into eight
+  // similar-looking rows, which is how someone ends up downloading half a video.
+  const pair = await findJoinablePair(items);
+  const rest = pair
+    ? items.filter((i) => i !== pair.video && i !== pair.audio)
+    : items;
 
-  for (const item of items) {
+  if (pair) listEl.append(joinedCard(pair));
+
+  // The batch bar acts on the individual files, so it is only useful when they are the
+  // thing being chosen from.
+  batchEl.hidden = pair !== null || rest.length < 2;
+
+  const host = pair ? foldFor(rest.length) : listEl;
+  for (const item of rest) {
     const card = document.createElement("div");
     card.className = "card item stack";
 
@@ -221,9 +275,30 @@ function renderCandidates(items: DetectedItem[]): void {
     });
 
     card.append(title, meta, action);
-    listEl.append(card);
+    host.append(card);
   }
+  if (host !== listEl) listEl.append(host.parentElement ?? host);
   updateBatchState();
+}
+
+/**
+ * A collapsed section for the files that are not the answer.
+ *
+ * Present rather than hidden: the pairing is a guess about which two tracks belong
+ * together, and on a busy feed page it can pair the wrong ones. Someone who needs to
+ * correct that has to be able to see the parts.
+ */
+function foldFor(count: number): HTMLElement {
+  // `panel` is the design system's disclosure: it draws the caret and hides the
+  // browser's default marker, so this matches every other fold in the product.
+  const details = document.createElement("details");
+  details.className = "panel stack";
+  const summary = document.createElement("summary");
+  summary.textContent = `Other files on this page (${count})`;
+  const body = document.createElement("div");
+  body.className = "stack";
+  details.append(summary, body);
+  return body;
 }
 
 function updateBatchState(): void {
@@ -248,6 +323,7 @@ async function refresh(): Promise<void> {
   // extractor is the better answer and its own button explains what it needs.
   // Quark first: it has no extractor, so the site panel would not claim it, and it is
   // the one source that has to run its requests inside the tab to see the user's session.
+  pageTitle = tab.title?.trim() || null;
   if (!(await initQuarkPanel(tab))) await initSitePanel(tab);
 
   const pattern = originPattern(tab.url);
@@ -277,13 +353,13 @@ async function refresh(): Promise<void> {
     action: "listCandidates",
     tabId: tab.id,
   })) as PopupResponse;
-  if ("candidates" in response) renderCandidates(response.candidates);
+  if ("candidates" in response) await renderCandidates(response.candidates);
 }
 
 selectAllEl.addEventListener("change", () => {
   selected.clear();
   if (selectAllEl.checked) for (const c of candidates) selected.add(c.url);
-  renderCandidates(candidates);
+  void renderCandidates(candidates);
 });
 
 downloadSelectedBtn.addEventListener("click", () => {
