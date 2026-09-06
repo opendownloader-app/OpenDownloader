@@ -134,6 +134,10 @@ export async function fetchWithRetry(
   options: RetryOptions = {},
 ): Promise<Response> {
   let lastError: unknown;
+  /** Attempts actually made. Not the same as MAX_ATTEMPTS: the loop breaks early
+   *  for a failure that repeating cannot fix, and saying "5 attempts" after one is a
+   *  message that sends people looking for a flaky network. */
+  let attempts = 0;
   // The host may route requests through a relay; it rewrites the URL rather
   // than wrapping fetch, so retry, range and abort behaviour stay identical.
   const target = engineConfig.rewriteUrl(url);
@@ -142,6 +146,7 @@ export async function fetchWithRetry(
     if (options.signal?.aborted) {
       throw new DOMException("aborted", "AbortError");
     }
+    attempts = attempt + 1;
     try {
       const res = await fetch(target, {
         method: options.method ?? "GET",
@@ -195,5 +200,17 @@ export async function fetchWithRetry(
         "an ordinary home connection, is usually what works.",
     );
   }
-  throw new Error(`failed after ${MAX_ATTEMPTS} attempts: ${detail}`);
+  // A CORS-shaped failure is rethrown as the `TypeError` it was, not wrapped.
+  //
+  // Wrapping it in a plain `Error` is what made every downstream
+  // `looksLikeCorsFailure()` check dead code: the web app has a specific, useful answer
+  // for this case — run the relay, or use the extension — and it could never reach it,
+  // so a YouTube link on a page with no relay reported "failed after 5 attempts: Failed
+  // to fetch" and left the user with nothing to act on. The loop already breaks on the
+  // first one, so there is no retry history worth preserving either.
+  if (looksLikeCorsFailure(lastError)) throw lastError;
+
+  throw new Error(
+    `failed after ${attempts} attempt${attempts === 1 ? "" : "s"}: ${detail}`,
+  );
 }

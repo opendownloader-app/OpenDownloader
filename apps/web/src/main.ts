@@ -36,6 +36,7 @@ import {
 } from "@opendownloader/engine";
 import { Manager, candidateForUrl, mountTools } from "@opendownloader/ui";
 
+import { mountAccountPanel } from "./account";
 import { mountTranscribePanel } from "./transcribe-panel";
 
 // Test-only engine configuration, applied before anything can start a download.
@@ -342,6 +343,9 @@ let relayAdopted = false;
 
 void adoptLocalRelay();
 void adoptTorrentBridge();
+// Additive and lazy: the panel loads its own bundle, and the page is fully usable
+// before and without it.
+void mountAccountPanel(document.getElementById("account-panel"));
 
 const manager = new Manager({
   root: document.getElementById("manager") as HTMLElement,
@@ -646,7 +650,14 @@ async function add(): Promise<void> {
   } catch (e) {
     statusEl.className = "status-error";
     const message = e instanceof Error ? e.message : String(e);
-    if (!relay.enabled && /\b403\b|refused this request/.test(message)) {
+    // Two shapes of the same problem: the site answered 403, or the browser refused to
+    // let this page read the answer at all. Both mean "a web page cannot ask this site
+    // directly", and both have the same two answers — so they get the same sentence
+    // rather than one useful message and one shrug.
+    if (
+      !relay.enabled &&
+      (/\b403\b|refused this request/.test(message) || looksLikeCorsFailure(e))
+    ) {
       statusEl.textContent =
         "That site will not answer a web page directly — it refuses every origin but its " +
         "own. Run the relay (npm start does it, on port 8088) and this page will find it " +
