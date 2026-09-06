@@ -336,6 +336,29 @@ pub fn site_name_for(url: &str) -> Option<String> {
     crate::sites::site_for(url).map(str::to_string)
 }
 
+/// Every site with a dedicated extractor in this build, as JSON.
+///
+/// `[{"name":…,"host":…,"withoutATab":bool}]`. `withoutATab` is false for the sites that
+/// can only be read from a loaded page — the web app shows those as needing the
+/// extension rather than letting someone find out by pasting a link.
+#[wasm_bindgen]
+pub fn supported_sites() -> String {
+    let sites: Vec<_> = crate::sites::supported_sites()
+        .into_iter()
+        .map(|s| {
+            serde_json::json!({
+                "name": s.name,
+                // The host, not the whole probe URL: the example carries a placeholder id
+                // that exists for the consistency test, and showing it would read as a
+                // link worth clicking.
+                "host": crate::policy::host_of(s.example).unwrap_or_default(),
+                "withoutATab": s.without_a_tab,
+            })
+        })
+        .collect();
+    serde_json::to_string(&sites).unwrap_or_else(|_| "[]".to_string())
+}
+
 /// Whether this URL's extractor can work from a fetched page rather than a loaded tab.
 ///
 /// A host with no tab to read — the web app — asks this before offering to fetch the

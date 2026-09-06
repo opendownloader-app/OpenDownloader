@@ -292,6 +292,25 @@ export async function parseEd2kLink(
   return json ? (JSON.parse(json) as Ed2kLink) : undefined;
 }
 
+/** One site with a dedicated extractor in this build. */
+export interface SupportedSite {
+  name: string;
+  host: string;
+  /** False when only a loaded page will do, so the web app cannot resolve it. */
+  withoutATab: boolean;
+}
+
+/**
+ * Every site this build can extract from.
+ *
+ * Read from the core rather than written out in the UI: a store build compiles the
+ * large-platform extractors out, and a hardcoded list would keep advertising them.
+ */
+export async function supportedSites(): Promise<SupportedSite[]> {
+  const core = await loadCore();
+  return JSON.parse(core.supported_sites()) as SupportedSite[];
+}
+
 /** Guards against a site whose extractor loops. Each step is one network round trip. */
 const MAX_STEPS = 6;
 

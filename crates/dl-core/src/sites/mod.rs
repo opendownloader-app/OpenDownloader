@@ -500,6 +500,96 @@ const GENERIC_REGISTRY: &[(Matcher, Builder)] = &[
     (generic::matches, |_| Box::new(generic::Generic::new())),
 ];
 
+/// One site in the catalogue the front ends show.
+#[derive(Debug, Clone, Serialize)]
+pub struct SiteInfo {
+    /// What the extractor calls itself.
+    pub name: &'static str,
+    /// A URL of the shape this extractor claims, with a placeholder id that is
+    /// nonetheless *shaped* correctly — the test starts the real extractor on it, and an
+    /// id of the wrong shape fails to parse and would fail the test for the wrong
+    /// reason. The front ends show the hostname from this, not the whole string.
+    pub example: &'static str,
+    /// Whether a host with no tab to read — the web app — can resolve this site at all.
+    ///
+    /// False means the extractor's first move is to read a loaded page and it has no
+    /// fetch fallback, so only the extension can do it. Saying so up front is the
+    /// difference between a considered limit and an error message after a failed paste.
+    pub without_a_tab: bool,
+}
+
+/// Every site with a dedicated extractor in this build.
+///
+/// Ordered as the registry matches, and gated the same way: a store build compiles the
+/// large-platform extractors out, and this list shrinks with them rather than promising
+/// sites the binary cannot handle.
+pub fn supported_sites() -> Vec<SiteInfo> {
+    let mut sites: Vec<SiteInfo> = Vec::new();
+    #[cfg(feature = "platform-sites")]
+    sites.extend([
+        SiteInfo {
+            name: "YouTube",
+            example: "https://www.youtube.com/watch?v=VIDEOID1234",
+            without_a_tab: true,
+        },
+        SiteInfo {
+            name: "Bilibili",
+            example: "https://www.bilibili.com/video/BV1xx411c7mD",
+            without_a_tab: true,
+        },
+        SiteInfo {
+            name: "TikTok",
+            example: "https://www.tiktok.com/@user/video/1234567890",
+            without_a_tab: false,
+        },
+        SiteInfo {
+            name: "Douyin",
+            example: "https://www.douyin.com/video/1234567890",
+            without_a_tab: false,
+        },
+        SiteInfo {
+            name: "Instagram",
+            example: "https://www.instagram.com/reel/ABCdef12345/",
+            without_a_tab: false,
+        },
+        SiteInfo {
+            name: "Facebook",
+            example: "https://www.facebook.com/watch/?v=1234567890",
+            without_a_tab: false,
+        },
+        SiteInfo {
+            name: "WeChat",
+            example: "https://mp.weixin.qq.com/s/AbCdEfGhIjKlMnOp",
+            without_a_tab: false,
+        },
+    ]);
+    sites.extend([
+        SiteInfo {
+            name: "Vimeo",
+            example: "https://vimeo.com/123456789",
+            without_a_tab: true,
+        },
+        SiteInfo {
+            name: "Dailymotion",
+            example: "https://www.dailymotion.com/video/x8abcde",
+            without_a_tab: true,
+        },
+        // Clips only, and named so: the extractor refuses VODs and channels outright, and a
+        // catalogue entry reading just "Twitch" would promise the whole site.
+        SiteInfo {
+            name: "Twitch clips",
+            example: "https://clips.twitch.tv/AbcDefGhi123",
+            without_a_tab: true,
+        },
+        SiteInfo {
+            name: "X",
+            example: "https://x.com/user/status/1234567890",
+            without_a_tab: true,
+        },
+    ]);
+    sites
+}
+
 /// Whether this build carries the large-platform extractors.
 pub const fn has_platform_sites() -> bool {
     cfg!(feature = "platform-sites")
@@ -672,5 +762,74 @@ mod tests {
             "https://old.reddit.com/r/videos/comments/abc/"
         ));
         assert!(is_supported("https://streamable.com/abcdef"));
+    }
+}
+
+#[cfg(test)]
+mod catalogue {
+    use super::*;
+
+    /// The catalogue must describe the registry, not a memory of it.
+    ///
+    /// Both halves drift in the same way: an extractor gains a fetch fallback, or loses
+    /// one, and the list in `supported_sites` keeps saying what used to be true. Since
+    /// the entry carries an example URL, the check is cheap — start the real extractor on
+    /// the real URL and compare.
+    #[test]
+    fn every_entry_matches_the_extractor_it_names() {
+        for site in supported_sites() {
+            let mut extractor = extractor_for(site.example)
+                .unwrap_or_else(|| panic!("no extractor claims {}", site.example));
+            // `starts_with`, not equality: an entry may narrow the extractor's own name
+            // where the extractor handles less than the brand ("Twitch clips" — VODs and
+            // channels are refused outright). It may not contradict it, which is what
+            // this still catches.
+            assert!(
+                site.name.starts_with(extractor.site()),
+                "{} is matched by {}, which the entry calls {}",
+                site.example,
+                extractor.site(),
+                site.name
+            );
+
+            // Without a tab, a host can only work from fetches. So the claim holds when
+            // the first move is a fetch, or when the extractor has said it can carry on
+            // from a page someone fetched for it.
+            let starts_with_fetch = matches!(
+                extractor.start(site.example),
+                Ok(Step::Need(Need::Fetch(_)))
+            );
+            let reachable = starts_with_fetch || extractor.accepts_fetched_page();
+            assert_eq!(
+                site.without_a_tab,
+                reachable,
+                "{} claims without_a_tab={} but the extractor {}",
+                site.name,
+                site.without_a_tab,
+                if reachable {
+                    "can work from fetches"
+                } else {
+                    "needs a loaded tab"
+                }
+            );
+        }
+    }
+
+    /// A store build compiles the platform extractors out, so the catalogue must shrink
+    /// with them rather than advertising sites the binary cannot handle.
+    #[test]
+    fn the_catalogue_never_promises_more_than_the_build_carries() {
+        for site in supported_sites() {
+            assert!(
+                extractor_for(site.example).is_some(),
+                "{} is listed but nothing in this build claims it",
+                site.name
+            );
+        }
+        assert_eq!(
+            supported_sites().iter().any(|s| s.name == "YouTube"),
+            has_platform_sites(),
+            "YouTube's presence must follow the platform-sites feature"
+        );
     }
 }

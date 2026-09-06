@@ -26,6 +26,7 @@ import {
   remuxLocalSegments,
   resolveDownloadLink,
   siteAcceptsFetchedPage,
+  supportedSites,
   siteFor,
   updateSettings,
   webPlatform,
@@ -346,6 +347,7 @@ void adoptTorrentBridge();
 // Only a hint on the header control. Lazy, failure-tolerant, and never on the path
 // of anything the page actually does.
 void reflectAccountState(document.getElementById("account-link"));
+void renderSupportedSites(document.getElementById("site-list"));
 
 const manager = new Manager({
   root: document.getElementById("manager") as HTMLElement,
@@ -610,6 +612,41 @@ async function queueOption(
       : {}),
   });
   await manager.start();
+}
+
+/**
+ * List the sites this build can extract from, and say plainly where each one works.
+ *
+ * Read from the core rather than written out here: a store build compiles the
+ * large-platform extractors out, and a list typed into the page would go on advertising
+ * them. Marking the extension-only ones is the point of the section — the alternative is
+ * someone pasting an Instagram link and learning it from an error.
+ */
+async function renderSupportedSites(root: HTMLElement | null): Promise<void> {
+  if (!root) return;
+  try {
+    const sites = await supportedSites();
+    root.replaceChildren(
+      ...sites.map((site) => {
+        const chip = document.createElement("span");
+        chip.className = site.withoutATab ? "site here" : "site";
+        const name = document.createElement("span");
+        name.textContent = site.name;
+        const where = document.createElement("span");
+        where.className = "where";
+        where.textContent = site.withoutATab ? "here" : "extension";
+        chip.append(name, where);
+        chip.title = site.withoutATab
+          ? `Paste a ${site.host} link on this page.`
+          : `${site.host} has to be read from its own page — open it in a tab and use the extension there.`;
+        return chip;
+      }),
+    );
+  } catch {
+    // The list is a courtesy; the link box works without it, and an error here would say
+    // nothing a visitor could act on.
+    root.remove();
+  }
 }
 
 async function add(): Promise<void> {

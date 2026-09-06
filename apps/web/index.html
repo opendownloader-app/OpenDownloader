@@ -196,6 +196,39 @@
         background: color-mix(in oklab, var(--accent) 88%, var(--black));
         color: var(--black);
       }
+      .sites {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+      }
+      /* One chip per site. The two states are the whole point of the section, so they
+         differ in more than a word: the extension-only ones are outlined and quiet,
+         the ones that work here carry the accent. */
+      .site {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        border: var(--border-width) solid var(--border-hairline);
+        background: var(--surface-card);
+        font-size: var(--text-sm);
+        color: var(--text-strong);
+      }
+      .site .where {
+        font-size: var(--text-xs);
+        color: var(--text-muted);
+      }
+      .site.here {
+        border-color: color-mix(
+          in oklab,
+          var(--accent) 40%,
+          var(--border-hairline)
+        );
+      }
+      .site.here .where {
+        color: var(--accent-text);
+      }
       #tools > * + * {
         margin-top: var(--space-2);
       }
@@ -275,38 +308,15 @@
       </p>
     </section>
 
-    <section>
-      <h2>What people use this for</h2>
-      <div class="tasks">
-        <div class="card">
-          <h3>Saving a recorded class</h3>
-          <p>
-            Keep a lecture or training video for offline study, with the
-            download resuming if the connection drops.
-          </p>
-        </div>
-        <div class="card">
-          <h3>Keeping a meeting recording</h3>
-          <p>
-            Save a call recording to your own disk before the link expires, and
-            confirm the copy is intact.
-          </p>
-        </div>
-        <div class="card">
-          <h3>Turning a video into audio</h3>
-          <p>
-            Pull the soundtrack out of a video as an M4A or MP3 to listen to on
-            the way somewhere.
-          </p>
-        </div>
-        <div class="card">
-          <h3>Rescuing a broken stream</h3>
-          <p>
-            Join loose <code>.ts</code> segments back into one playable MP4 when
-            a download stopped part way.
-          </p>
-        </div>
-      </div>
+    <section id="sites">
+      <h2>Sites it knows</h2>
+      <p class="muted" style="margin: 0 0 var(--space-5)">
+        Any direct link to a media file or a playlist works anywhere. These have
+        extractors of their own, so pasting a page link is enough — and the ones
+        marked need the extension, because a web page is not allowed to read
+        another site's page.
+      </p>
+      <div id="site-list" class="sites"></div>
     </section>
 
     <section>
