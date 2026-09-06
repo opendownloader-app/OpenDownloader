@@ -4,7 +4,12 @@
 // a download. Clicking an item writes a job to IndexedDB and opens the manager
 // tab, so an evicted worker cannot drop a queued job on the floor.
 
-import { enqueueCandidate, formatSize, type DetectedItem } from "@opendownloader/engine";
+import {
+  enqueueCandidate,
+  formatSize,
+  mediaHostPatterns,
+  type DetectedItem,
+} from "@opendownloader/engine";
 
 import { ext, openManagerTab } from "../platform/webext";
 import type { PopupResponse } from "../shared/messages";
@@ -20,7 +25,9 @@ const openBtn = document.getElementById("open") as HTMLButtonElement;
 const clearBtn = document.getElementById("clear") as HTMLButtonElement;
 const batchEl = document.getElementById("batch") as HTMLDivElement;
 const selectAllEl = document.getElementById("select-all") as HTMLInputElement;
-const downloadSelectedBtn = document.getElementById("download-selected") as HTMLButtonElement;
+const downloadSelectedBtn = document.getElementById(
+  "download-selected",
+) as HTMLButtonElement;
 const audioOnlyEl = document.getElementById("audio-only") as HTMLInputElement;
 
 /** URLs the user has ticked. Kept here rather than read back off the DOM. */
@@ -39,7 +46,8 @@ function originPattern(url: string | undefined): string | null {
     const parsed = new URL(url);
     // Only http(s) pages can be granted a host permission; chrome:// and
     // about: pages cannot, and asking would throw.
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      return null;
     return `${parsed.protocol}//${parsed.hostname}/*`;
   } catch {
     return null;
@@ -145,7 +153,10 @@ async function refresh(): Promise<void> {
 
   const pattern = originPattern(tab.url);
   if (pattern) {
-    const granted = await ext.permissions.contains({ origins: [pattern] });
+    // The same set the grant button asks for. Checking only the page host would call a
+    // site "enabled" while the listener still cannot see its media.
+    const needed = [pattern, ...(await mediaHostPatterns(tab.url ?? ""))];
+    const granted = await ext.permissions.contains({ origins: needed });
     permissionEl.hidden = granted;
     siteEl.textContent = new URL(tab.url ?? "").hostname;
     if (!granted) {
@@ -178,7 +189,10 @@ selectAllEl.addEventListener("change", () => {
 
 downloadSelectedBtn.addEventListener("click", () => {
   // Nothing ticked means "all of them", which is what the label says.
-  const chosen = selected.size > 0 ? candidates.filter((c) => selected.has(c.url)) : candidates;
+  const chosen =
+    selected.size > 0
+      ? candidates.filter((c) => selected.has(c.url))
+      : candidates;
   void queue(chosen);
 });
 
@@ -187,9 +201,18 @@ grantBtn.addEventListener("click", () => {
     const tab = await activeTab();
     const pattern = originPattern(tab?.url);
     if (!pattern) return;
+    // The page's own host, plus the CDNs this site streams from. Both are needed and
+    // only the first is obvious: the listener that finds a download watches network
+    // requests, and the video comes from another domain entirely — `zjcdn.com` for
+    // Douyin, `fbcdn.net` for Facebook. Granting only the page host leaves the popup
+    // permanently empty on those sites, which reads as "nothing here to download".
+    //
+    // Asked for together so it is one prompt naming everything, rather than a second
+    // prompt later at a moment the user cannot connect to what they clicked.
+    const origins = [pattern, ...(await mediaHostPatterns(tab?.url ?? ""))];
     // `permissions.request` needs a user gesture, which this click provides.
     // Granting is per-origin, so enabling one site says nothing about any other.
-    const granted = await ext.permissions.request({ origins: [pattern] });
+    const granted = await ext.permissions.request({ origins });
     if (granted) {
       permissionEl.hidden = true;
       // The listener only starts seeing this origin's traffic from now on, so

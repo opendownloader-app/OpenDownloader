@@ -381,6 +381,20 @@ pub fn site_name_for(url: &str) -> Option<String> {
     crate::sites::site_for(url).map(str::to_string)
 }
 
+/// Host patterns to request permission for alongside a site's own page, as JSON.
+///
+/// `["*://*.zjcdn.com/*", …]` — the CDNs that site streams from. Without these the
+/// network listener never sees the media on a site that plays through MSE, and the popup
+/// offers nothing while looking correctly set up.
+#[wasm_bindgen]
+pub fn media_host_patterns(url: &str) -> String {
+    let patterns: Vec<String> = crate::sites::media_hosts(url)
+        .into_iter()
+        .map(|h| format!("*://*.{h}/*"))
+        .collect();
+    serde_json::to_string(&patterns).unwrap_or_else(|_| "[]".to_string())
+}
+
 /// Every non-extractor source this build accepts, as JSON.
 ///
 /// `[{"name":…,"accepts":…,"needsLocalHelper":bool}]`. Separate from `supported_sites`

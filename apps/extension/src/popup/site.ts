@@ -25,6 +25,7 @@ import {
   formatSize,
   hasAudioChoice,
   isSupportedSite,
+  mediaHostPatterns,
   jobIdFor,
   pair,
   pairingProblem,
@@ -53,7 +54,13 @@ const siteOptions = document.getElementById("site-options") as HTMLDivElement;
  * from the button handler rather than when the panel is rendered.
  */
 async function ensurePermission(url: string): Promise<boolean> {
-  const origins = [`${new URL(url).protocol}//${new URL(url).hostname}/*`];
+  const origins = [
+    `${new URL(url).protocol}//${new URL(url).hostname}/*`,
+    // The CDNs this site streams from. Reading the page is only half of it: on a site
+    // that plays through MSE the page holds a `blob:` URL and the real addresses are
+    // only ever seen by the network listener, which needs permission for those hosts.
+    ...(await mediaHostPatterns(url)),
+  ];
   if (await ext.permissions.contains({ origins })) return true;
   return ext.permissions.request({ origins });
 }

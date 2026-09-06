@@ -323,6 +323,18 @@ export async function supportedSites(): Promise<SupportedSite[]> {
   return JSON.parse(core.supported_sites()) as SupportedSite[];
 }
 
+/**
+ * Host patterns to request permission for besides the page's own.
+ *
+ * A site streams its video from a CDN on another domain, and a host permission is what
+ * lets the extension's network listener see requests to it. Granting only the page's
+ * host leaves the listener blind to exactly the requests that matter.
+ */
+export async function mediaHostPatterns(url: string): Promise<string[]> {
+  const core = await loadCore();
+  return JSON.parse(core.media_host_patterns(url)) as string[];
+}
+
 /** A source with no extractor: a link kind rather than a website. */
 export interface SupportedSource {
   name: string;

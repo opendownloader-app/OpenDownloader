@@ -658,6 +658,47 @@ pub fn supported_sources() -> Vec<SourceInfo> {
     ]
 }
 
+/// The hosts a site serves its *media* from, which are not the host of its page.
+///
+/// This exists because of what a host permission actually gates. Granting
+/// `www.douyin.com` lets the extension read that page — and leaves its network listener
+/// blind to `v3-dy-o.zjcdn.com`, which is where the video bytes come from. The listener
+/// is how a download is found on a site that streams through MSE, where the page holds a
+/// `blob:` URL and nothing else, so being blind to the CDN means finding nothing at all
+/// while everything looks correctly configured.
+///
+/// It is not the same question as [`Extractor`] routing. `matches` decides which
+/// extractor claims a URL, and adding a CDN there would route a bare media URL to a page
+/// extractor that cannot read it. This decides which hosts to *ask permission for* when
+/// a user enables a site, and the two lists differ on purpose.
+///
+/// Only hosts observed serving media are listed. A guessed CDN is a permission asked for
+/// and never used, which is worse than the prompt it adds.
+pub fn media_hosts(url: &str) -> Vec<&'static str> {
+    let Some(host) = crate::policy::host_of(url) else {
+        return Vec::new();
+    };
+    if douyin::matches(&host) {
+        // `zjcdn.com` observed serving a reel; the other two are Douyin's other CDNs.
+        vec!["zjcdn.com", "douyinvod.com", "bytecdn.cn"]
+    } else if meta::matches(&host) {
+        vec!["fbcdn.net", "cdninstagram.com"]
+    } else if tiktok::matches(&host) {
+        vec![
+            "tiktokcdn.com",
+            "tiktokcdn-us.com",
+            "tiktokv.com",
+            "byteoversea.com",
+        ]
+    } else if bilibili::matches(&host) {
+        vec!["bilivideo.com", "akamaized.net"]
+    } else if weixin::matches(&host) {
+        vec!["qpic.cn", "video.qq.com"]
+    } else {
+        Vec::new()
+    }
+}
+
 /// Whether this build carries the large-platform extractors.
 pub const fn has_platform_sites() -> bool {
     cfg!(feature = "platform-sites")
@@ -836,6 +877,29 @@ mod tests {
 #[cfg(test)]
 mod catalogue {
     use super::*;
+    /// A media host is asked for permission, not routed to an extractor.
+    #[test]
+    fn media_hosts_are_named_for_the_sites_that_stream_from_them() {
+        let douyin = media_hosts("https://www.douyin.com/jingxuan?modal_id=1");
+        assert!(
+            douyin.contains(&"zjcdn.com"),
+            "observed serving Douyin video"
+        );
+
+        assert!(media_hosts("https://www.facebook.com/reel/1").contains(&"fbcdn.net"));
+        assert!(media_hosts("https://www.instagram.com/reel/x/").contains(&"cdninstagram.com"));
+        // A site with no separate media host, and a site with no extractor at all.
+        assert!(media_hosts("https://www.youtube.com/watch?v=1").is_empty());
+        assert!(media_hosts("https://example.com/a.mp4").is_empty());
+
+        // The two lists are different questions: a CDN must not claim a page extractor.
+        for host in douyin {
+            assert!(
+                !crate::sites::douyin::matches(host),
+                "{host} is a media host; routing it to the page extractor would be wrong"
+            );
+        }
+    }
 
     /// The catalogue must describe the registry, not a memory of it.
     ///
