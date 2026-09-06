@@ -476,8 +476,8 @@ export async function extract(
                     // stops the reader debugging their setup.
                     `${new URL(request.url).hostname} refused this video (403). It is ` +
                     "usually restricted by whoever posted it — playable on the site " +
-                    "itself, or only on domains they approved. Anything found on the " +
-                    "page while it plays is listed below and may still be downloadable."
+                    "itself, or only on domains they approved, and no permission or " +
+                    "retry here changes that."
                   : `${new URL(request.url).hostname} answered ${response.status}`,
             );
           }
