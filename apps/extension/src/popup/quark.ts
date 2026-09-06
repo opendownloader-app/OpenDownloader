@@ -60,6 +60,12 @@ interface QuarkTree {
   truncated: boolean;
 }
 
+interface DownloadResult {
+  files: Resolved[];
+  /** Quark's own account facts, fetched only when something was refused. */
+  account: { tier: string; total: number; used: number } | null;
+}
+
 interface Resolved {
   fid: string;
   /** Empty when Quark refused this one; `error` then says why. */
@@ -173,7 +179,26 @@ async function quarkInPage(
           });
         }
       }
-      return { ok: true, data: out };
+      // When Quark refused anything, ask it who this account is. Its refusal code is
+      // the same shape whatever the reason, and the account's own tier and quota are
+      // what actually explain it — far better than a message that guesses.
+      let account: { tier: string; total: number; used: number } | null = null;
+      if (out.some((o) => !o.url)) {
+        try {
+          const { data } = await call(
+            `${API}/member?pr=ucpro&fr=pc&fetch_subscribe=true&_ch=home&fetch_identity=true`,
+          );
+          account = {
+            tier: typeof data.member_type === "string" ? data.member_type : "",
+            total:
+              typeof data.total_capacity === "number" ? data.total_capacity : 0,
+            used: typeof data.use_capacity === "number" ? data.use_capacity : 0,
+          };
+        } catch {
+          // An account lookup that fails changes nothing; the refusal still reports.
+        }
+      }
+      return { ok: true, data: { files: out, account } };
     }
 
     // ---- walk every folder ------------------------------------------------
@@ -464,14 +489,15 @@ async function download(
   let queued = 0;
   const tooLarge: QuarkFile[] = [];
   const staleSession: QuarkFile[] = [];
+  let account: { tier: string; total: number; used: number } | null = null;
   const otherFailures: { file: QuarkFile; error: string }[] = [];
 
   for (let i = 0; i < files.length; i += BATCH) {
     const batch = files.slice(i, i + BATCH);
     siteStatus.textContent = `Asking Quark for ${i + 1}\u2013${Math.min(i + BATCH, files.length)} of ${files.length}\u2026`;
-    let resolved: Resolved[];
+    let outcome: DownloadResult;
     try {
-      resolved = await inTab<Resolved[]>(
+      outcome = await inTab<DownloadResult>(
         tabId,
         "download",
         pwdId,
@@ -487,7 +513,8 @@ async function download(
       return;
     }
 
-    for (const item of resolved) {
+    if (outcome.account) account = outcome.account;
+    for (const item of outcome.files) {
       const file = byFid.get(item.fid);
       if (!file) continue;
       if (item.url) {
@@ -516,11 +543,17 @@ async function download(
   if (queued > 0)
     parts.push(`Queued ${queued} file${queued === 1 ? "" : "s"}.`);
   if (tooLarge.length > 0) {
-    // What this code means is inferred from the run, not asserted. If some files came
-    // through and others did not, the boundary between them is a real per-file cap and
-    // naming it is useful. If nothing came through, the cap is not the distinguishing
-    // factor and saying it would send someone to upgrade an account for no reason.
     const refusedSmallest = [...tooLarge].sort((a, b) => a.size - b.size)[0]!;
+    // Quark's account facts, where it gave them. `23018` reads as a size limit and is
+    // not one: it is what a share download returns to an account that is not entitled
+    // to it, at any size. Saying which account, and what its quota is, is the only
+    // version of this message that has ever been true.
+    const who = account
+      ? ` Quark says this account is ${account.tier === "NORMAL" ? "on the free tier" : account.tier}` +
+        (account.total > 0
+          ? `, using ${formatSize(account.used)} of ${formatSize(account.total)}.`
+          : ".")
+      : "";
     if (queued > 0) {
       const largestQueued = files
         .filter(
@@ -529,20 +562,21 @@ async function download(
         )
         .sort((a, b) => b.size - a.size)[0];
       parts.push(
-        `Quark refused ${tooLarge.length} as too large: the smallest it refused was ` +
+        `Quark refused ${tooLarge.length}: the smallest refused was ` +
           `${refusedSmallest.name} at ${formatSize(refusedSmallest.size)}` +
           (largestQueued
             ? `, and the largest it allowed was ${formatSize(largestQueued.size)}.`
             : ".") +
-          " That is Quark's own per-file limit for your account, not something this can lift.",
+          who,
       );
     } else {
       parts.push(
-        `Quark refused all ${tooLarge.length} with its size-limit code, including ` +
-          `${refusedSmallest.name} at ${formatSize(refusedSmallest.size)}. Since the ` +
-          `smallest was refused too, this is a limit on your Quark account rather ` +
-          `than on any one file. Saving the share to your own drive on the share page ` +
-          `and downloading from there is the usual way around it.`,
+        `Quark refused all ${tooLarge.length}, down to ${refusedSmallest.name} at ` +
+          `${formatSize(refusedSmallest.size)} \u2014 so this is not about file size.` +
+          who +
+          ` Downloading a shared file needs an account Quark will serve it to; saving ` +
+          `it to your own drive first needs room in that drive. Nothing here can lift ` +
+          `either, and neither is a fault in this download.`,
       );
     }
   }
