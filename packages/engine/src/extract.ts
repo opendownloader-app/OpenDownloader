@@ -323,6 +323,23 @@ export async function supportedSites(): Promise<SupportedSite[]> {
   return JSON.parse(core.supported_sites()) as SupportedSite[];
 }
 
+/**
+ * The job kind an option's first stream should be downloaded as.
+ *
+ * Both front ends used to hardcode `"progressive"` for anything not being merged, which
+ * meant an HLS master playlist was fetched as if it were the file: a couple of kilobytes
+ * of `.m3u8` written to a `.mp4`, reported complete, and hashed. The core decides now.
+ */
+export async function jobKindForStream(stream: {
+  url: string;
+  mime?: string | null;
+}): Promise<"progressive" | "hlsplaylist"> {
+  const core = await loadCore();
+  return core.stream_is_hls_playlist(stream.mime ?? undefined, stream.url)
+    ? "hlsplaylist"
+    : "progressive";
+}
+
 /** Guards against a site whose extractor loops. Each step is one network round trip. */
 const MAX_STEPS = 6;
 

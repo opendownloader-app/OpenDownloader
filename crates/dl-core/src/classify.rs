@@ -72,6 +72,22 @@ const SEGMENT_EXTENSIONS: &[&str] = &["ts", "m4s", "cmfv", "cmfa"];
 /// Segment MIME types, same reasoning as [`SEGMENT_EXTENSIONS`].
 const SEGMENT_MIMES: &[&str] = &["video/mp2t", "audio/mp2t"];
 
+/// Whether a stream is an HLS playlist rather than a file.
+///
+/// Public because the front ends need the same answer and were guessing at it. Both
+/// labelled every non-merged option "progressive", so a Vimeo master playlist was
+/// downloaded as though it were the video: 2.6 KB of `.m3u8` written to a `.mp4`,
+/// reported complete, and given a SHA-256 — a wrong answer wearing the badge of a
+/// verified one. Deciding it here means one rule, and it is the rule the sniffer already
+/// classifies by.
+pub fn is_hls_playlist(mime: Option<&str>, url: &str) -> bool {
+    let mime = mime.map(normalize_mime);
+    if mime.as_deref().is_some_and(|m| HLS_MIMES.contains(&m)) {
+        return true;
+    }
+    url_extension(url).as_deref() == Some("m3u8")
+}
+
 /// Decide whether an observed response is worth offering, and as what.
 ///
 /// Returns `None` for anything that is not media, is a stream segment, or is barred by
@@ -97,9 +113,7 @@ pub fn classify(meta: &RequestMeta) -> Option<MediaCandidate> {
         return None;
     }
 
-    let kind = if mime.as_deref().is_some_and(|m| HLS_MIMES.contains(&m))
-        || ext.as_deref() == Some("m3u8")
-    {
+    let kind = if is_hls_playlist(mime.as_deref(), &meta.url) {
         MediaKind::HlsPlaylist
     } else if mime.as_deref().is_some_and(is_progressive_mime) {
         MediaKind::Progressive

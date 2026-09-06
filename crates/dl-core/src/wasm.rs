@@ -324,6 +324,15 @@ pub fn peer_link_refusal(url: &str) -> Option<String> {
     crate::links::peer_link_refusal(url)
 }
 
+/// Whether a stream is an HLS playlist rather than a file.
+///
+/// Front ends ask before deciding what kind of job to create; guessing produced a
+/// playlist saved as a video and marked verified.
+#[wasm_bindgen]
+pub fn stream_is_hls_playlist(mime: Option<String>, url: &str) -> bool {
+    crate::classify::is_hls_playlist(mime.as_deref(), url)
+}
+
 /// Whether any site extractor claims this URL.
 #[wasm_bindgen]
 pub fn site_is_supported(url: &str) -> bool {

@@ -19,6 +19,7 @@
 // genuinely separate files and collapsing them into one list takes away a real choice.
 
 import {
+  jobKindForStream,
   audioOnly,
   extract,
   formatSize,
@@ -95,7 +96,7 @@ async function queueOption(
     // second, and `pageUrl` always holds where it came from.
     url: merged ? pageUrl : first.url,
     filename: option.filename,
-    kind: merged ? "merge" : "progressive",
+    kind: merged ? "merge" : await jobKindForStream(first),
     status: "queued",
     stateJson: "",
     totalBytes: optionSize(option),

@@ -18,6 +18,7 @@ import {
   hasAudioChoice,
   isSupportedSite,
   jobIdFor,
+  jobKindForStream,
   looksLikeCorsFailure,
   pair,
   pairingProblem,
@@ -621,7 +622,7 @@ async function queueOption(
     id,
     url: merged ? pageUrl : first.url,
     filename: option.filename,
-    kind: merged ? "merge" : "progressive",
+    kind: merged ? "merge" : await jobKindForStream(first),
     status: "queued",
     stateJson: "",
     totalBytes: option.streams.reduce<number | null>(

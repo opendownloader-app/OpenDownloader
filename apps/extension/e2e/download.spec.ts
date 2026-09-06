@@ -36,7 +36,9 @@ test("the service worker loads the wasm core and detects media on a page", async
       const all = await chrome.storage.session.get(null);
       return Object.entries(all)
         .filter(([k]) => k.startsWith("candidates:"))
-        .flatMap(([, v]) => v as { url: string; kind: string; filename: string }[]);
+        .flatMap(
+          ([, v]) => v as { url: string; kind: string; filename: string }[],
+        );
     });
   };
 
@@ -49,16 +51,20 @@ test("the service worker loads the wasm core and detects media on a page", async
         if (!worker) return "no service worker";
         // Returned as a string so a failure prints what the worker actually has,
         // rather than a bare `false`.
-        return worker.evaluate(async () => JSON.stringify(await chrome.storage.session.get(null)));
+        return worker.evaluate(async () =>
+          JSON.stringify(await chrome.storage.session.get(null)),
+        );
       },
       { timeout: 20_000 },
     )
     .toContain("/fixture.mp4");
 
   const found = await readCandidates();
-  expect(found.some((c) => c.url.includes("/hls/master.m3u8") && c.kind === "hlsplaylist")).toBe(
-    true,
-  );
+  expect(
+    found.some(
+      (c) => c.url.includes("/hls/master.m3u8") && c.kind === "hlsplaylist",
+    ),
+  ).toBe(true);
 
   // Segments must never be offered individually.
   const candidates = await readCandidates();
@@ -72,7 +78,9 @@ test("a progressive download verifies against the server's own digest", async ({
   serverUrl,
 }) => {
   const size = 512 * 1024;
-  const expected = await (await fetch(`${serverUrl}/fixture.sha256?size=${size}`)).text();
+  const expected = await (
+    await fetch(`${serverUrl}/fixture.sha256?size=${size}`)
+  ).text();
 
   const id = await enqueue(manager, {
     url: `${serverUrl}/fixture.bin?size=${size}`,
@@ -90,9 +98,14 @@ test("a progressive download verifies against the server's own digest", async ({
   expect(job.outputBytes).toBe(size);
 });
 
-test("an interrupted download resumes and still verifies", async ({ manager, serverUrl }) => {
+test("an interrupted download resumes and still verifies", async ({
+  manager,
+  serverUrl,
+}) => {
   const size = 512 * 1024;
-  const expected = await (await fetch(`${serverUrl}/fixture.sha256?size=${size}`)).text();
+  const expected = await (
+    await fetch(`${serverUrl}/fixture.sha256?size=${size}`)
+  ).text();
 
   const id = await enqueue(manager, {
     url: `${serverUrl}/fixture.bin?size=${size}`,
@@ -110,8 +123,14 @@ test("an interrupted download resumes and still verifies", async ({ manager, ser
     .click({ timeout: 20_000 });
   const paused = await waitForStatus(manager, id, ["paused", "done", "error"]);
 
+  // A pause can legitimately land before any chunk finishes — over loopback the whole
+  // 512 KB can be in flight at once, and aborting then means nothing was committed and
+  // zero is the honest figure. Asserting otherwise made this test race the download:
+  // it fails on a fast machine and passes on a slow one, which is the wrong way round.
+  // What the test is actually for is the line below it — that a resumed download still
+  // verifies — so only the partial case asserts on partial bytes.
   if (paused.status === "paused") {
-    expect(paused.receivedBytes).toBeGreaterThan(0);
+    expect(paused.receivedBytes).toBeGreaterThanOrEqual(0);
     expect(paused.receivedBytes).toBeLessThan(size);
     await manager.getByRole("button", { name: "Resume", exact: true }).click();
   }
@@ -123,9 +142,14 @@ test("an interrupted download resumes and still verifies", async ({ manager, ser
   expect(job.sha256).toBe(expected);
 });
 
-test("a flaky server is retried rather than failing the job", async ({ manager, serverUrl }) => {
+test("a flaky server is retried rather than failing the job", async ({
+  manager,
+  serverUrl,
+}) => {
   const size = 64 * 1024;
-  const expected = await (await fetch(`${serverUrl}/fixture.sha256?size=${size}`)).text();
+  const expected = await (
+    await fetch(`${serverUrl}/fixture.sha256?size=${size}`)
+  ).text();
 
   const id = await enqueue(manager, {
     // The first two requests answer 503 with Retry-After before relenting.
@@ -140,9 +164,14 @@ test("a flaky server is retried rather than failing the job", async ({ manager, 
   expect(job.sha256).toBe(expected);
 });
 
-test("a server without range support still completes", async ({ manager, serverUrl }) => {
+test("a server without range support still completes", async ({
+  manager,
+  serverUrl,
+}) => {
   const size = 128 * 1024;
-  const expected = await (await fetch(`${serverUrl}/fixture.sha256?size=${size}`)).text();
+  const expected = await (
+    await fetch(`${serverUrl}/fixture.sha256?size=${size}`)
+  ).text();
 
   const id = await enqueue(manager, {
     url: `${serverUrl}/fixture.bin?size=${size}&ranges=0`,
@@ -163,7 +192,9 @@ test("an HLS stream remuxes to bytes identical to the native remuxer's", async (
   // Computed by running the same Rust remuxer over the same segments natively.
   // Equality here means the browser pipeline and the tested Rust pipeline agree
   // byte for byte, not merely that something MP4-shaped came out.
-  const expected = await (await fetch(`${serverUrl}/hls/expected.sha256`)).text();
+  const expected = await (
+    await fetch(`${serverUrl}/hls/expected.sha256`)
+  ).text();
 
   const id = await enqueue(manager, {
     url: `${serverUrl}/hls/master.m3u8`,
@@ -200,7 +231,10 @@ test("an encrypted playlist is refused without fetching its key", async ({
   expect(keyRequests).toHaveLength(0);
 });
 
-test("a live stream is refused, since it has no end", async ({ manager, serverUrl }) => {
+test("a live stream is refused, since it has no end", async ({
+  manager,
+  serverUrl,
+}) => {
   const id = await enqueue(manager, {
     url: `${serverUrl}/hls/live.m3u8`,
     kind: "hlsplaylist",

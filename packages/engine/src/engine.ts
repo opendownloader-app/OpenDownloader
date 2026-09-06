@@ -200,6 +200,15 @@ async function decryptorFor(
   };
 }
 
+/**
+ * How many chunks to queue per connection.
+ *
+ * Deep enough that a worker finishing early always has something waiting, shallow enough
+ * that the plan is re-derived often enough to notice ranges recorded by a resumed
+ * session. Eight is comfortably past the point where the barrier stops being visible.
+ */
+const QUEUE_DEPTH = 8;
+
 /** Run a progressive (single-resource) download to completion. */
 async function runProgressive(
   job: Job,
@@ -240,62 +249,64 @@ async function runProgressive(
   rate.record(Number(session.downloaded()));
   let lastFlush = 0;
 
-  for (;;) {
-    throwIfAborted(opts.signal);
+  /** One chunk, start to disk. Lifted out so a worker can call it in a loop. */
+  const fetchChunk = async (r: {
+    start: number;
+    end: number;
+  }): Promise<void> => {
+    const headers: Record<string, string> = {};
+    if (info.acceptsRanges) {
+      const openEnded = r.end >= Number.MAX_SAFE_INTEGER;
+      headers.Range = openEnded
+        ? `bytes=${r.start}-`
+        : `bytes=${r.start}-${r.end}`;
+      // If-Range makes the server answer 200-with-whole-body instead of 206
+      // when the resource changed, which is how a stale resume is detected
+      // rather than silently splicing two different files together.
+      if (info.validator) headers["If-Range"] = info.validator;
+    }
 
-    const ranges = JSON.parse(session.plan(BigInt(chunkSize), parallel)) as {
-      start: number;
-      end: number;
-    }[];
-    if (ranges.length === 0) break;
+    const res = await fetchWithRetry(job.url, {
+      headers,
+      signal: opts.signal,
+      // See `Job.maxChunkBytes`: a host that states a request size throttles with
+      // 403 rather than refusing outright, and waiting is the right response.
+      retryForbidden: job.maxChunkBytes !== undefined,
+      onRetry: (attempt, delay, reason) =>
+        opts.onProgress({
+          received: Number(session.downloaded()),
+          total: info.total,
+          status: "downloading",
+          message: `${reason} — retry ${attempt} in ${Math.round(delay / 1000)}s`,
+        }),
+    });
+    if (!res.ok && res.status !== 206) {
+      throw new Error(`chunk ${r.start} failed: ${res.status}`);
+    }
+    if (resuming && res.status === 200) {
+      throw new Error("the file changed on the server; restart this download");
+    }
 
-    await Promise.all(
-      ranges.map(async (r) => {
-        const headers: Record<string, string> = {};
-        if (info.acceptsRanges) {
-          const openEnded = r.end >= Number.MAX_SAFE_INTEGER;
-          headers.Range = openEnded
-            ? `bytes=${r.start}-`
-            : `bytes=${r.start}-${r.end}`;
-          // If-Range makes the server answer 200-with-whole-body instead of 206
-          // when the resource changed, which is how a stale resume is detected
-          // rather than silently splicing two different files together.
-          if (info.validator) headers["If-Range"] = info.validator;
-        }
+    const raw = new Uint8Array(await res.arrayBuffer());
+    if (raw.length === 0) return;
+    // Decrypt before the sink, so what lands on disk is the plaintext and the
+    // read-back digest describes the file the user actually has.
+    const bytes = decryptChunk ? await decryptChunk(r.start, raw) : raw;
+    await sink.write(r.start, bytes);
+    session.record(BigInt(r.start), BigInt(r.start + bytes.length - 1));
+    await afterChunk();
+  };
 
-        const res = await fetchWithRetry(job.url, {
-          headers,
-          signal: opts.signal,
-          // See `Job.maxChunkBytes`: a host that states a request size throttles with
-          // 403 rather than refusing outright, and waiting is the right response.
-          retryForbidden: job.maxChunkBytes !== undefined,
-          onRetry: (attempt, delay, reason) =>
-            opts.onProgress({
-              received: Number(session.downloaded()),
-              total: info.total,
-              status: "downloading",
-              message: `${reason} — retry ${attempt} in ${Math.round(delay / 1000)}s`,
-            }),
-        });
-        if (!res.ok && res.status !== 206) {
-          throw new Error(`chunk ${r.start} failed: ${res.status}`);
-        }
-        if (resuming && res.status === 200) {
-          throw new Error(
-            "the file changed on the server; restart this download",
-          );
-        }
-
-        const raw = new Uint8Array(await res.arrayBuffer());
-        if (raw.length === 0) return;
-        // Decrypt before the sink, so what lands on disk is the plaintext and the
-        // read-back digest describes the file the user actually has.
-        const bytes = decryptChunk ? await decryptChunk(r.start, raw) : raw;
-        await sink.write(r.start, bytes);
-        session.record(BigInt(r.start), BigInt(r.start + bytes.length - 1));
-      }),
-    );
-
+  /**
+   * Progress and resume state, per finished chunk.
+   *
+   * These used to sit after the batch, which was fine when a batch was one round of
+   * `parallel` chunks. With a queue eight times deeper that became eight times less
+   * often: the bar looked stuck, and — worse — a download paused early had never
+   * flushed, so resuming started from zero. The e2e suite caught exactly that.
+   */
+  let flushing = false;
+  const afterChunk = async (): Promise<void> => {
     const received = Number(session.downloaded());
     rate.record(received);
     opts.onProgress({
@@ -307,12 +318,65 @@ async function runProgressive(
     });
 
     const now = Date.now();
-    if (now - lastFlush > STATE_FLUSH_MS) {
+    // Time-gated, and never two at once: workers finish concurrently, and overlapping
+    // writes of the same row buy nothing.
+    if (now - lastFlush > STATE_FLUSH_MS && !flushing) {
+      flushing = true;
       lastFlush = now;
+      try {
+        await updateJob(job.id, {
+          stateJson: session.stateJson(),
+          receivedBytes: received,
+        });
+      } finally {
+        flushing = false;
+      }
+    }
+  };
+
+  for (;;) {
+    throwIfAborted(opts.signal);
+
+    // Plan far more chunks than there are connections.
+    //
+    // This loop used to plan exactly `parallel` chunks and `Promise.all` them, which
+    // made every batch a barrier: three connections finishing in 100ms sat idle until
+    // the fourth finished, and a download's throughput became the slowest chunk of each
+    // batch, repeatedly. Queueing depth ahead of the workers is what removes that — a
+    // connection that finishes takes the next chunk immediately instead of waiting for
+    // its peers. It is the cheaper half of what a dedicated download manager does.
+    const ranges = JSON.parse(
+      session.plan(BigInt(chunkSize), parallel * QUEUE_DEPTH),
+    ) as { start: number; end: number }[];
+    if (ranges.length === 0) break;
+
+    // Workers pull from one shared queue, so a slow chunk delays only its own worker.
+    let next = 0;
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(parallel, ranges.length) }, async () => {
+          for (;;) {
+            throwIfAborted(opts.signal);
+            const r = ranges[next++];
+            if (!r) return;
+            await fetchChunk(r);
+          }
+        }),
+      );
+    } catch (e) {
+      // Persist what did land before giving up.
+      //
+      // A pause aborts every worker at once, and the periodic flush only runs when a
+      // chunk *finishes* — so an abort that arrives while all of them are mid-request
+      // left the row saying zero bytes and threw away real progress on resume. Rarer
+      // with shallow batches, which is why it survived until the queue got deeper.
       await updateJob(job.id, {
         stateJson: session.stateJson(),
-        receivedBytes: received,
+        receivedBytes: Number(session.downloaded()),
+      }).catch(() => {
+        // The original failure is the one worth reporting.
       });
+      throw e;
     }
 
     // Without range support there is exactly one request, and it either
