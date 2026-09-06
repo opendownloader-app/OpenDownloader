@@ -216,6 +216,42 @@ async function main() {
       );
     }
 
+    // The platform name must not reach anything a visitor can read. This is a
+    // regression test, not a style check: the string that got through last time was
+    // inside a vendored element's shadow DOM — `<openapps-login>` defaults its heading
+    // to "Sign in to OpenApps" — so grepping our own source would have passed while the
+    // rendered page said it plainly. Hence: read what the page actually shows.
+    const visibleText = await page.evaluate(() =>
+      [
+        document.body.innerText,
+        ...[...document.querySelectorAll("*")]
+          .filter((el) => el.shadowRoot)
+          .map((el) => el.shadowRoot.textContent ?? ""),
+      ].join(" "),
+    );
+    const leaked = visibleText.match(/OpenApps/g) ?? [];
+    check(
+      "the platform name is not visible anywhere on the page",
+      leaked.length === 0,
+      leaked.length ? visibleText.match(/.{0,70}OpenApps.{0,70}/)[0].replace(/\s+/g, " ") : "",
+    );
+
+    // The other half of the same property: no shipped source outside the one module that
+    // defines the hostnames may name the backend. Two literals is how OpenCapture moved
+    // to a custom domain and left one call site pointing at the old host.
+    const bundleLeak = await page.evaluate(async () => {
+      const srcs = [...document.querySelectorAll("script[src]")].map((s) => s.src);
+      const bodies = await Promise.all(
+        srcs.map((u) => fetch(u).then((r) => r.text()).catch(() => "")),
+      );
+      return bodies.filter((b) => b.includes("accounts.openapps.network")).length;
+    });
+    check(
+      "no shipped bundle names the backend directly",
+      bundleLeak === 0,
+      bundleLeak ? `${bundleLeak} bundle(s) contain accounts.openapps.network` : "",
+    );
+
     check("no uncaught page errors", pageErrors.length === 0, pageErrors.join("; "));
   } finally {
     await browser.close();

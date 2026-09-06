@@ -2,9 +2,14 @@
 //
 // Deliberately not a gate. Every feature of OpenDownloader runs in this tab, on the
 // user's own machine, so there is nothing here to meter and nothing to withhold — an
-// account exists so that one OpenApps identity and its credits work across the *other*
-// tools in the suite. The elements below are therefore additive: signed out, the page
-// works exactly as it always did.
+// account exists so that one identity and its credits work across the *other* apps in
+// the suite. The elements below are therefore additive: signed out, the page works
+// exactly as it always did.
+//
+// Note the copy below never says "OpenApps". The platform name is for these comments
+// and for the code; someone here has only ever heard of OpenDownloader, and naming a
+// company they have no relationship with, at the moment they are deciding whether to
+// sign in, is the one place it does active harm.
 
 import { OPENAPPS_BASE_URL } from "./lib/openapps";
 
@@ -46,14 +51,21 @@ export async function mountAccountPanel(
 ): Promise<void> {
   if (!root) return;
 
+  // `heading` and `description` are overridden because the element's own defaults are
+  // "Sign in to OpenApps" and "One account for every app in the suite" — correct for
+  // the platform's own pages and wrong on a product page, where the visitor has never
+  // heard of OpenApps and is being asked to trust a sign-in.
   const body = document.createElement("div");
   body.className = "stack";
   body.innerHTML = `
     <p class="muted" style="margin:0">
-      Signing in is optional and unlocks nothing here — every feature works signed out.
-      An OpenApps account carries your credits across the other tools in the suite.
+      Optional, and it unlocks nothing here. An account carries credits to our other
+      apps; everything on this page stays free either way.
     </p>
-    <openapps-login></openapps-login>
+    <openapps-login
+      heading="Sign in to OpenDownloader"
+      description="One account across our apps. You do not need it here — nothing on this page is behind it."
+    ></openapps-login>
     <openapps-credits poll-seconds="30"></openapps-credits>
     <openapps-history page-size="5"></openapps-history>
   `;
