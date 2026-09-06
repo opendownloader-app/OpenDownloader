@@ -455,16 +455,78 @@ fn duration_ms(aweme: &Value, video: &Value) -> Option<u64> {
         .filter(|ms| *ms > 0)
 }
 
-/// The numeric id out of `…/video/<id>` or `…/share/video/<id>/`.
+/// The numeric id of the video a URL names.
+///
+/// Two shapes, because Douyin has two. A permalink puts the id in the path —
+/// `…/video/<id>`, or `…/share/video/<id>/`. Everywhere else the video opens as an
+/// overlay on top of whatever page you were on, and the id is a query parameter instead:
+/// `douyin.com/jingxuan?modal_id=<id>`, and the same on `/discover`, a user's page and
+/// the home feed.
+///
+/// Reading only the path form is why a `modal_id` link failed. The page it loads
+/// describes several videos — the feed underneath the overlay — so with no id to pick
+/// with, the extractor either took the wrong one or found nothing it could tie to the
+/// URL. The id is what makes the choice unambiguous, and it was there all along.
 fn video_id(page_url: &str) -> Option<String> {
-    let after = page_url.split("/video/").nth(1)?;
-    let id = after.split(['/', '?', '#']).next()?;
-    (!id.is_empty()).then(|| id.to_string())
+    if let Some(after) = page_url.split("/video/").nth(1) {
+        let id = after.split(['/', '?', '#']).next().unwrap_or("");
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
+    }
+    modal_id(page_url)
+}
+
+/// `modal_id=<id>` from the query string, whichever parameter position it is in.
+fn modal_id(page_url: &str) -> Option<String> {
+    let query = page_url.split(['?', '#']).nth(1)?;
+    for pair in query.split('&') {
+        if let Some(value) = pair.strip_prefix("modal_id=") {
+            let id = value.split('#').next().unwrap_or("");
+            // Douyin's ids are decimal. Checking keeps a stray `modal_id=login` or an
+            // empty value from being handed on as though it named a video.
+            if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_id_is_read_from_a_permalink_or_from_modal_id() {
+        // The path form, which always worked.
+        assert_eq!(
+            video_id("https://www.douyin.com/video/7300000000000000001").as_deref(),
+            Some("7300000000000000001")
+        );
+        assert_eq!(
+            video_id("https://www.iesdouyin.com/share/video/999/?region=SG").as_deref(),
+            Some("999")
+        );
+        // The overlay form, which did not. This is the link a person copies from the
+        // feed, and it is the common one.
+        assert_eq!(
+            video_id("https://www.douyin.com/jingxuan?modal_id=7681584405361560878").as_deref(),
+            Some("7681584405361560878")
+        );
+        assert_eq!(
+            video_id("https://www.douyin.com/discover?a=1&modal_id=42&b=2").as_deref(),
+            Some("42")
+        );
+        assert_eq!(
+            video_id("https://www.douyin.com/user/MS4wLjAB?modal_id=7#play").as_deref(),
+            Some("7")
+        );
+        // A page with no video named at all, and a non-numeric value that is not an id.
+        assert_eq!(video_id("https://www.douyin.com/jingxuan"), None);
+        assert_eq!(video_id("https://www.douyin.com/jingxuan?modal_id="), None);
+        assert_eq!(video_id("https://www.douyin.com/jingxuan?modal_id=login"), None);
+    }
 
     const ROUTER_PAGE: &str = r#"<html><head><title>ignored</title></head><body>
 <script>window._ROUTER_DATA = {"loaderData":{"video_(7300000000000000001)/page":{"videoInfoRes":{"item_list":[{
