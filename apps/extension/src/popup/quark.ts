@@ -36,6 +36,15 @@ const siteOptions = document.getElementById("site-options") as HTMLDivElement;
 /** One file anywhere in the share, with the folders it sits under. */
 interface QuarkFile {
   fid: string;
+  /**
+   * `share_fid_token` from the listing.
+   *
+   * Quark issues one per file per share session, and the download endpoint checks it
+   * against the `stoken` it was issued under — a token from an earlier session is
+   * refused with `41020`, not ignored. So it travels with the file and the session it
+   * came from travels with it too.
+   */
+  token: string;
   /** Folders joined with "/", then the filename. Shown so two same-named files differ. */
   path: string;
   name: string;
@@ -44,6 +53,8 @@ interface QuarkFile {
 
 interface QuarkTree {
   title: string;
+  /** The share session the file tokens below were issued under. */
+  stoken: string;
   files: QuarkFile[];
   /** True when a limit stopped the walk, so the list is not the whole share. */
   truncated: boolean;
@@ -71,7 +82,8 @@ async function quarkInPage(
   op: "tree" | "download",
   pwdId: string,
   passcode: string,
-  fids: string[],
+  session: string,
+  items: { fid: string; token: string }[],
 ): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
   const API = "https://drive-pc.quark.cn/1/clouddrive";
   // Bounds, so a hostile or enormous share cannot spin here forever. Each is generous
@@ -109,42 +121,53 @@ async function quarkInPage(
     return { data: json.data ?? {}, total: json.metadata?._total ?? 0 };
   };
 
-  const token = await call(`${API}/share/sharepage/token?pr=ucpro&fr=pc`, {
-    pwd_id: pwdId,
-    passcode,
-  });
-  const stoken = typeof token.data.stoken === "string" ? token.data.stoken : "";
+  // A download reuses the session the listing ran under, because the file tokens were
+  // issued against it. Opening a fresh one here would invalidate every token in hand.
+  let stoken = session;
+  if (!stoken) {
+    const token = await call(`${API}/share/sharepage/token?pr=ucpro&fr=pc`, {
+      pwd_id: pwdId,
+      passcode,
+    });
+    stoken = typeof token.data.stoken === "string" ? token.data.stoken : "";
+  }
   if (!stoken) throw new Error("Quark did not open that share.");
 
   try {
     if (op === "download") {
-      // One request per file rather than one for the batch. Quark answers a list of ids
-      // with a single verdict, so one file the account may not have — over its size cap,
-      // typically — refuses every other file asked for alongside it. Asking separately
-      // costs a round trip each and is the difference between "nine of ten" and "none".
+      // `file/share/download`, not `file/download`. They are different endpoints and
+      // only this one serves a file out of a share: the other answers `23018,
+      // "download file size limit"` to every file at every size, signed in or not,
+      // which reads like a quota and is really "wrong endpoint". It also takes
+      // `fids_token`, the per-file token from the listing, without which it answers
+      // `41020`.
       const out: { fid: string; url: string; error: string }[] = [];
-      for (const fid of fids) {
+      for (const item of items) {
         try {
-          const { data } = await call(`${API}/file/download?pr=ucpro&fr=pc`, {
-            pwd_id: pwdId,
-            stoken,
-            fids: [fid],
-          });
+          const { data } = await call(
+            `${API}/file/share/download?pr=ucpro&fr=pc`,
+            {
+              fids: [item.fid],
+              fids_token: [item.token],
+              pwd_id: pwdId,
+              stoken,
+            },
+          );
           const first = (Array.isArray(data) ? data[0] : data) as {
             download_url?: string;
           };
           if (first?.download_url) {
-            out.push({ fid, url: first.download_url, error: "" });
+            out.push({ fid: item.fid, url: first.download_url, error: "" });
           } else {
             out.push({
-              fid,
+              fid: item.fid,
               url: "",
               error: "Quark returned no download URL.",
             });
           }
         } catch (e) {
           out.push({
-            fid,
+            fid: item.fid,
             url: "",
             error: e instanceof Error ? e.message : String(e),
           });
@@ -218,6 +241,10 @@ async function quarkInPage(
           } else if (files.length < MAX_FILES) {
             files.push({
               fid,
+              token:
+                typeof raw.share_fid_token === "string"
+                  ? raw.share_fid_token
+                  : "",
               name,
               path: dir.prefix ? `${dir.prefix}/${name}` : name,
               size: typeof raw.size === "number" ? raw.size : 0,
@@ -231,7 +258,7 @@ async function quarkInPage(
       } while (seen < total && page <= 25);
     }
 
-    return { ok: true, data: { title, files, truncated } };
+    return { ok: true, data: { title, stoken, files, truncated } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -243,13 +270,14 @@ async function inTab<T>(
   op: "tree" | "download",
   pwdId: string,
   passcode: string,
-  fids: string[],
+  session: string,
+  items: { fid: string; token: string }[],
 ): Promise<T> {
   const results = await ext.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
     func: quarkInPage,
-    args: [op, pwdId, passcode, fids],
+    args: [op, pwdId, passcode, session, items],
   });
   const result = results[0]?.result as
     { ok: true; data: T } | { ok: false; error: string } | undefined;
@@ -435,6 +463,7 @@ async function download(
   const BATCH = 10;
   let queued = 0;
   const tooLarge: QuarkFile[] = [];
+  const staleSession: QuarkFile[] = [];
   const otherFailures: { file: QuarkFile; error: string }[] = [];
 
   for (let i = 0; i < files.length; i += BATCH) {
@@ -447,7 +476,8 @@ async function download(
         "download",
         pwdId,
         "",
-        batch.map((f) => f.fid),
+        tree.stoken,
+        batch.map((f) => ({ fid: f.fid, token: f.token })),
       );
     } catch (e) {
       // A failure out here is the injection or the share token, not one file.
@@ -468,6 +498,10 @@ async function download(
           item.url,
         );
         queued += 1;
+      } else if (/41020|token/i.test(item.error)) {
+        // The share session expired between listing and downloading, so every file
+        // token in hand is now void. Re-listing mints new ones.
+        staleSession.push(file);
       } else if (/size limit/i.test(item.error)) {
         tooLarge.push(file);
       } else {
@@ -505,13 +539,18 @@ async function download(
     } else {
       parts.push(
         `Quark refused all ${tooLarge.length} with its size-limit code, including ` +
-          `${refusedSmallest.name} at ${formatSize(refusedSmallest.size)}. Since it ` +
-          `refused the smallest file too, this is unlikely to be about size: Quark ` +
-          `often requires a shared file to be saved to your own drive first, and ` +
-          `downloaded from there. Try "Save to my drive" on the share page, then ` +
-          `download from your own files.`,
+          `${refusedSmallest.name} at ${formatSize(refusedSmallest.size)}. Since the ` +
+          `smallest was refused too, this is a limit on your Quark account rather ` +
+          `than on any one file. Saving the share to your own drive on the share page ` +
+          `and downloading from there is the usual way around it.`,
       );
     }
+  }
+  if (staleSession.length > 0) {
+    parts.push(
+      `${staleSession.length} could not be fetched because this share listing has ` +
+        `expired. Click "List everything in this share" again to refresh it.`,
+    );
   }
   if (otherFailures.length > 0) {
     parts.push(
@@ -575,7 +614,14 @@ export async function initQuarkPanel(
             "until you grant it, and it can be revoked at any time.";
           return;
         }
-        const tree = await inTab<QuarkTree>(tabId, "tree", pwdId, passcode, []);
+        const tree = await inTab<QuarkTree>(
+          tabId,
+          "tree",
+          pwdId,
+          passcode,
+          "",
+          [],
+        );
         if (tree.files.length === 0) {
           siteStatus.textContent = "This share holds no files.";
           return;

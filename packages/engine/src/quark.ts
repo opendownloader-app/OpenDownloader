@@ -35,6 +35,8 @@ const QUARK_UA =
 /** One entry in a share — a file to download, or a directory to open. */
 export interface QuarkEntry {
   fid: string;
+  /** `share_fid_token`, issued per file per share session; the download check needs it. */
+  token: string;
   name: string;
   /** Bytes. Zero for a directory. */
   size: number;
@@ -120,9 +122,11 @@ function entriesFrom(list: unknown): QuarkEntry[] {
       file_name?: string;
       size?: number;
       dir?: boolean;
+      share_fid_token?: string;
     };
     return {
       fid: f.fid ?? "",
+      token: f.share_fid_token ?? "",
       name: f.file_name ?? "(unnamed)",
       size: typeof f.size === "number" ? f.size : 0,
       isDir: f.dir === true,
@@ -210,12 +214,17 @@ export async function resolveQuarkDownload(
 ): Promise<string> {
   let data: Record<string, unknown>;
   try {
-    data = await quarkCall(`${QUARK_API}/file/download?${QUARK_PARAMS}`, {
+    // `file/share/download`, not `file/download`. Only this one serves a file out of a
+    // share; the other answers `23018, "download file size limit"` for every file at
+    // every size, which reads like a quota and is really the wrong endpoint. It also
+    // needs `fids_token` from the listing, without which it answers `41020`.
+    data = await quarkCall(`${QUARK_API}/file/share/download?${QUARK_PARAMS}`, {
       method: "POST",
       body: JSON.stringify({
+        fids: [entry.fid],
+        fids_token: [entry.token],
         pwd_id: share.pwdId,
         stoken: share.stoken,
-        fids: [entry.fid],
       }),
     });
   } catch (e) {
