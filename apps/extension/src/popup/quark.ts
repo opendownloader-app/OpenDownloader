@@ -51,7 +51,9 @@ interface QuarkTree {
 
 interface Resolved {
   fid: string;
+  /** Empty when Quark refused this one; `error` then says why. */
   url: string;
+  error: string;
 }
 
 /**
@@ -100,7 +102,9 @@ async function quarkInPage(
       metadata?: { _total?: number };
     };
     if (json.code !== 0) {
-      throw new Error(json.message || `Quark refused this (code ${json.code}).`);
+      throw new Error(
+        json.message || `Quark refused this (code ${json.code}).`,
+      );
     }
     return { data: json.data ?? {}, total: json.metadata?._total ?? 0 };
   };
@@ -114,21 +118,39 @@ async function quarkInPage(
 
   try {
     if (op === "download") {
-      const { data } = await call(`${API}/file/download?pr=ucpro&fr=pc`, {
-        pwd_id: pwdId,
-        stoken,
-        fids,
-      });
-      const list = (Array.isArray(data) ? data : []) as {
-        fid?: string;
-        download_url?: string;
-      }[];
-      return {
-        ok: true,
-        data: list
-          .filter((f) => f.fid && f.download_url)
-          .map((f) => ({ fid: f.fid!, url: f.download_url! })),
-      };
+      // One request per file rather than one for the batch. Quark answers a list of ids
+      // with a single verdict, so one file the account may not have — over its size cap,
+      // typically — refuses every other file asked for alongside it. Asking separately
+      // costs a round trip each and is the difference between "nine of ten" and "none".
+      const out: { fid: string; url: string; error: string }[] = [];
+      for (const fid of fids) {
+        try {
+          const { data } = await call(`${API}/file/download?pr=ucpro&fr=pc`, {
+            pwd_id: pwdId,
+            stoken,
+            fids: [fid],
+          });
+          const first = (Array.isArray(data) ? data[0] : data) as {
+            download_url?: string;
+          };
+          if (first?.download_url) {
+            out.push({ fid, url: first.download_url, error: "" });
+          } else {
+            out.push({
+              fid,
+              url: "",
+              error: "Quark returned no download URL.",
+            });
+          }
+        } catch (e) {
+          out.push({
+            fid,
+            url: "",
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+      return { ok: true, data: out };
     }
 
     // ---- walk every folder ------------------------------------------------
@@ -230,9 +252,7 @@ async function inTab<T>(
     args: [op, pwdId, passcode, fids],
   });
   const result = results[0]?.result as
-    | { ok: true; data: T }
-    | { ok: false; error: string }
-    | undefined;
+    { ok: true; data: T } | { ok: false; error: string } | undefined;
   if (!result) {
     throw new Error("could not read this page — reload it and try again");
   }
@@ -255,7 +275,9 @@ function namesFor(files: QuarkFile[]): Map<string, string> {
     const unique = (counts.get(f.name) ?? 0) < 2;
     out.set(
       f.fid,
-      unique ? f.name : f.path.replace(/\//g, " - ").replace(/[\\:*?"<>|]/g, "_"),
+      unique
+        ? f.name
+        : f.path.replace(/\//g, " - ").replace(/[\\:*?"<>|]/g, "_"),
     );
   }
   return out;
@@ -387,7 +409,15 @@ function renderTree(
     : tree.title;
 }
 
-/** Resolve the chosen files and queue them. */
+/**
+ * Resolve the chosen files and queue the ones Quark releases.
+ *
+ * Quark's refusal for a file the account may not download is `code 23018,
+ * "download file size limit"`, and it means what it says: a per-file size cap that
+ * depends on the account, not a missing sign-in. A signed-in free account still hits it
+ * on a large file. So a refusal names the files and their sizes rather than sending
+ * someone off to sign in again, and everything under the cap is queued regardless.
+ */
 async function download(
   tabId: number,
   pageUrl: string,
@@ -398,71 +428,107 @@ async function download(
 ): Promise<void> {
   const files = tree.files.filter((f) => chosen.has(f.fid));
   const names = namesFor(files);
+  const byFid = new Map(files.map((f) => [f.fid, f]));
   action.disabled = true;
   siteStatus.className = "muted";
 
-  // In batches rather than one request per file: Quark's download endpoint takes a list,
-  // and asking once for forty files is one round trip instead of forty.
-  const BATCH = 20;
+  const BATCH = 10;
   let queued = 0;
-  const failures: string[] = [];
+  const tooLarge: QuarkFile[] = [];
+  const otherFailures: { file: QuarkFile; error: string }[] = [];
 
   for (let i = 0; i < files.length; i += BATCH) {
     const batch = files.slice(i, i + BATCH);
-    siteStatus.textContent = `Asking Quark for ${i + 1}–${Math.min(i + BATCH, files.length)} of ${files.length}…`;
+    siteStatus.textContent = `Asking Quark for ${i + 1}\u2013${Math.min(i + BATCH, files.length)} of ${files.length}\u2026`;
+    let resolved: Resolved[];
     try {
-      const resolved = await inTab<Resolved[]>(
+      resolved = await inTab<Resolved[]>(
         tabId,
         "download",
         pwdId,
         "",
         batch.map((f) => f.fid),
       );
-      const byFid = new Map(resolved.map((r) => [r.fid, r.url]));
-      for (const file of batch) {
-        const url = byFid.get(file.fid);
-        if (!url) {
-          failures.push(file.name);
-          continue;
-        }
-        await queueFile(pageUrl, names.get(file.fid) ?? file.name, file.size, url);
-        queued += 1;
-      }
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      // Quark's own words for "not signed in", which do not say so.
-      if (/size limit/i.test(message)) {
-        siteStatus.className = "status-error";
-        siteStatus.textContent =
-          "Quark refused these files. That answer means it does not recognise a " +
-          "signed-in account on this page — sign in to Quark in this tab, reload, " +
-          "and try again.";
-        action.disabled = false;
-        return;
+      // A failure out here is the injection or the share token, not one file.
+      siteStatus.className = "status-error";
+      siteStatus.textContent = e instanceof Error ? e.message : String(e);
+      action.disabled = false;
+      return;
+    }
+
+    for (const item of resolved) {
+      const file = byFid.get(item.fid);
+      if (!file) continue;
+      if (item.url) {
+        await queueFile(
+          pageUrl,
+          names.get(file.fid) ?? file.name,
+          file.size,
+          item.url,
+        );
+        queued += 1;
+      } else if (/size limit/i.test(item.error)) {
+        tooLarge.push(file);
+      } else {
+        otherFailures.push({ file, error: item.error });
       }
-      failures.push(...batch.map((f) => f.name));
     }
   }
 
+  // Say exactly what happened, in the order that matters to someone waiting: what is
+  // downloading, then what is not and why.
+  const parts: string[] = [];
+  if (queued > 0)
+    parts.push(`Queued ${queued} file${queued === 1 ? "" : "s"}.`);
+  if (tooLarge.length > 0) {
+    // What this code means is inferred from the run, not asserted. If some files came
+    // through and others did not, the boundary between them is a real per-file cap and
+    // naming it is useful. If nothing came through, the cap is not the distinguishing
+    // factor and saying it would send someone to upgrade an account for no reason.
+    const refusedSmallest = [...tooLarge].sort((a, b) => a.size - b.size)[0]!;
+    if (queued > 0) {
+      const largestQueued = files
+        .filter(
+          (f) =>
+            !tooLarge.includes(f) && !otherFailures.some((o) => o.file === f),
+        )
+        .sort((a, b) => b.size - a.size)[0];
+      parts.push(
+        `Quark refused ${tooLarge.length} as too large: the smallest it refused was ` +
+          `${refusedSmallest.name} at ${formatSize(refusedSmallest.size)}` +
+          (largestQueued
+            ? `, and the largest it allowed was ${formatSize(largestQueued.size)}.`
+            : ".") +
+          " That is Quark's own per-file limit for your account, not something this can lift.",
+      );
+    } else {
+      parts.push(
+        `Quark refused all ${tooLarge.length} with its size-limit code, including ` +
+          `${refusedSmallest.name} at ${formatSize(refusedSmallest.size)}. Since it ` +
+          `refused the smallest file too, this is unlikely to be about size: Quark ` +
+          `often requires a shared file to be saved to your own drive first, and ` +
+          `downloaded from there. Try "Save to my drive" on the share page, then ` +
+          `download from your own files.`,
+      );
+    }
+  }
+  if (otherFailures.length > 0) {
+    parts.push(
+      `${otherFailures.length} failed for another reason: ${otherFailures[0]!.error}`,
+    );
+  }
+
+  siteStatus.className = queued > 0 ? "muted" : "status-error";
+  siteStatus.textContent = parts.join(" ");
+
   if (queued === 0) {
-    siteStatus.className = "status-error";
-    siteStatus.textContent = `Quark released none of those ${files.length} files.`;
     action.disabled = false;
     return;
   }
-
-  // Partial success is reported rather than rounded up: a download that quietly drops
-  // three of twelve files is worse than one that says which three.
-  if (failures.length > 0) {
-    siteStatus.className = "status-error";
-    siteStatus.textContent = `Queued ${queued}; Quark refused ${failures.length}: ${failures.slice(0, 3).join(", ")}${failures.length > 3 ? "…" : ""}`;
-    action.disabled = false;
-    await openManagerTab();
-    return;
-  }
-
   await openManagerTab();
-  window.close();
+  // Left open when something was refused, so the explanation is still readable.
+  if (tooLarge.length === 0 && otherFailures.length === 0) window.close();
 }
 
 /**
@@ -490,7 +556,9 @@ export async function initQuarkPanel(
   siteOptions.replaceChildren();
 
   const origins = [`${new URL(url).protocol}//${new URL(url).hostname}/*`];
-  const granted = await ext.permissions.contains({ origins }).catch(() => false);
+  const granted = await ext.permissions
+    .contains({ origins })
+    .catch(() => false);
   siteButton.textContent = granted
     ? "List everything in this share"
     : "Allow this site, then list everything in it";
