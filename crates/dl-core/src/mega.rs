@@ -55,17 +55,12 @@ pub fn parse(url: &str) -> Option<MegaLink> {
         return None;
     }
 
-    let (handle, key_b64) = if let Some(rest) = after(url, "/file/") {
-        // Modern form: /file/<handle>#<key>
-        let (handle, key) = rest.split_once('#')?;
-        (handle, key)
-    } else if let Some(rest) = after(url, "/#!") {
-        // Legacy form: /#!<handle>!<key>
-        let (handle, key) = rest.split_once('!')?;
-        (handle, key)
-    } else {
-        // `/folder/` and `/#F!` are deliberately not handled here.
-        return None;
+    // Two link forms, both still in circulation, and the separator differs. `/folder/`
+    // and `/#F!` match neither on purpose — see `is_folder_link`.
+    let (handle, key_b64) = match (after(url, "/file/"), after(url, "/#!")) {
+        (Some(rest), _) => rest.split_once('#')?,
+        (None, Some(rest)) => rest.split_once('!')?,
+        (None, None) => return None,
     };
 
     let handle = handle.split(['?', '&']).next()?;
@@ -150,7 +145,11 @@ mod tests {
         const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         let mut out = String::new();
         for chunk in bytes.chunks(3) {
-            let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+            let b = [
+                chunk[0],
+                *chunk.get(1).unwrap_or(&0),
+                *chunk.get(2).unwrap_or(&0),
+            ];
             let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
             for i in 0..=chunk.len() {
                 out.push(A[((n >> (18 - i * 6)) & 63) as usize] as char);
@@ -161,26 +160,39 @@ mod tests {
 
     #[test]
     fn a_modern_file_link_yields_handle_key_nonce_and_mac() {
-        let link = parse(&format!("https://mega.nz/file/AbCdEfGh#{}", sample_key_b64()))
-            .expect("parsed");
+        let link = parse(&format!(
+            "https://mega.nz/file/AbCdEfGh#{}",
+            sample_key_b64()
+        ))
+        .expect("parsed");
         assert_eq!(link.handle, "AbCdEfGh");
         // The two halves XORed: i ^ (255 - i).
         let expected: Vec<u8> = (0u8..16).map(|i| i ^ (255 - i)).collect();
         assert_eq!(link.key, expected);
         assert_eq!(link.nonce, (0u8..8).map(|i| 255 - i).collect::<Vec<_>>());
-        assert_eq!(link.meta_mac, (8u8..16).map(|i| 255 - i).collect::<Vec<_>>());
+        assert_eq!(
+            link.meta_mac,
+            (8u8..16).map(|i| 255 - i).collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn the_legacy_hash_bang_form_still_parses() {
-        let modern = parse(&format!("https://mega.nz/file/AbCdEfGh#{}", sample_key_b64())).unwrap();
+        let modern = parse(&format!(
+            "https://mega.nz/file/AbCdEfGh#{}",
+            sample_key_b64()
+        ))
+        .unwrap();
         let legacy = parse(&format!("https://mega.nz/#!AbCdEfGh!{}", sample_key_b64())).unwrap();
         assert_eq!(modern, legacy, "the two forms name the same file");
     }
 
     #[test]
     fn the_old_domain_is_the_same_service() {
-        assert!(matches(&format!("https://mega.co.nz/file/AbCdEfGh#{}", sample_key_b64())));
+        assert!(matches(&format!(
+            "https://mega.co.nz/file/AbCdEfGh#{}",
+            sample_key_b64()
+        )));
     }
 
     #[test]
@@ -218,7 +230,7 @@ mod tests {
     fn anything_that_is_not_a_mega_link_is_not_one() {
         for url in [
             "https://example.com/file/AbCdEfGh#key",
-            "https://mega.nz/file/AbCdEfGh",   // no key at all
+            "https://mega.nz/file/AbCdEfGh", // no key at all
             "https://notmega.nz.evil.test/file/A#B",
         ] {
             assert_eq!(parse(url), None, "should not parse: {url}");
