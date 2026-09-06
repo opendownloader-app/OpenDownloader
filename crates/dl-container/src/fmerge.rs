@@ -114,6 +114,38 @@ impl FragmentMerger {
         })
     }
 
+    /// Index inputs that arrive as several pieces each.
+    ///
+    /// `video` and `audio` are lists of `(bytes, offset)`: the init segment, then each
+    /// media segment's head, with the offset each begins at in its own stream. See
+    /// [`Input::parse_spans`] for why one `sidx` is not always enough.
+    pub fn from_segment_heads(
+        video: &[(&[u8], u64)],
+        audio: &[(&[u8], u64)],
+    ) -> Result<Self, Mp4Error> {
+        let video = Input::parse_spans(
+            video,
+            b"vide",
+            VIDEO_TRACK_ID,
+            Mp4Error::Malformed("video input has no video track"),
+        )?;
+        let audio = Input::parse_spans(audio, b"soun", AUDIO_TRACK_ID, Mp4Error::NoAudioTrack)?;
+
+        let duration_ms =
+            u64::try_from(video.duration_ms().max(audio.duration_ms())).unwrap_or(u64::MAX);
+        let reads = interleave(&video, &audio);
+        let init = init_segment(&video, &audio, duration_ms);
+
+        Ok(Self {
+            init,
+            reads,
+            next_read: 0,
+            init_emitted: false,
+            sequence: 1,
+            duration_ms,
+        })
+    }
+
     /// The `moof`+`mdat` byte ranges to fetch, interleaved by decode time.
     pub fn reads(&self) -> &[FragmentRead] {
         &self.reads
@@ -212,32 +244,81 @@ impl Input {
         track_id: u32,
         missing: Mp4Error,
     ) -> Result<Self, Mp4Error> {
-        let top = head_spans(head);
-        let moov = top
-            .iter()
-            .find(|s| &s.kind == b"moov")
-            .ok_or(Mp4Error::Malformed("fragmented input has no moov"))?;
-        let moov_body = &head[moov.body..moov.end];
+        Self::parse_spans(&[(head, 0)], handler, track_id, missing)
+    }
 
-        let (trak, source_id) = extract_trak(moov_body, handler, track_id, missing)?;
-        let trex = extract_trex(moov_body, source_id, track_id)?;
+    /// Index an input that arrives as several pieces rather than one.
+    ///
+    /// Each span is `(bytes, offset)` — a piece of the input and where it begins in the
+    /// whole stream. One `sidx` per span is read, and its fragment offsets are placed
+    /// relative to that span, so the fragments of every piece land at their true
+    /// positions in the concatenation.
+    ///
+    /// This exists because a rendition is not always one file. YouTube and Bilibili ship
+    /// one, with a single `sidx` at the head indexing every fragment in it, which is what
+    /// `parse` above assumes. Vimeo's adaptive format ships an init segment followed by
+    /// twenty-odd `.m4s` files, each carrying its own `sidx` describing only itself.
+    /// Reading just the first indexed one segment of twenty-one and produced 2.6 MB of an
+    /// 88 MB video: a file that opens in nothing, and looks like a completed download.
+    ///
+    /// The `moov` comes from whichever span holds it — the init segment, for a stream
+    /// shaped that way — and spans with no `sidx` are skipped rather than refused, since
+    /// an init segment has none.
+    fn parse_spans(
+        spans: &[(&[u8], u64)],
+        handler: &[u8; 4],
+        track_id: u32,
+        missing: Mp4Error,
+    ) -> Result<Self, Mp4Error> {
+        let mut trak_and_id = None;
+        let mut fragments = Vec::new();
+        let mut total_ticks: u64 = 0;
+        let mut timescale = 0u32;
 
-        // Walking to discover fragments is not an option: the caller holds the head and
-        // nothing else, so the index has to come from the index box.
-        let sidx = top
-            .iter()
-            .find(|s| &s.kind == b"sidx")
-            .ok_or(Mp4Error::Malformed(
+        for (bytes, base) in spans {
+            let top = head_spans(bytes);
+            if trak_and_id.is_none() {
+                if let Some(moov) = top.iter().find(|s| &s.kind == b"moov") {
+                    let moov_body = &bytes[moov.body..moov.end];
+                    let (trak, source_id) =
+                        extract_trak(moov_body, handler, track_id, missing.clone())?;
+                    let trex = extract_trex(moov_body, source_id, track_id)?;
+                    trak_and_id = Some((trak, trex));
+                }
+            }
+            // Walking to discover fragments is not an option: the caller holds heads and
+            // nothing else, so the index has to come from the index box.
+            let Some(sidx) = top.iter().find(|s| &s.kind == b"sidx") else {
+                continue;
+            };
+            let index = parse_sidx(&bytes[sidx.body..sidx.end], base + sidx.end as u64)?;
+            // Every piece restarts its own `sidx` timeline at zero, so decode times are
+            // carried forward across pieces rather than taken as stated. Without this
+            // every fragment claims to start at the beginning and the interleave puts
+            // them all in one place.
+            let offset_ms = to_ms(total_ticks, index.timescale.max(1));
+            fragments.extend(index.fragments.into_iter().map(|mut f| {
+                f.start_ms += offset_ms;
+                f
+            }));
+            total_ticks += index.total_ticks;
+            timescale = index.timescale;
+        }
+
+        let (trak, trex) =
+            trak_and_id.ok_or(Mp4Error::Malformed("fragmented input has no moov"))?;
+        if fragments.is_empty() {
+            return Err(Mp4Error::Malformed(
                 "fragmented input has no sidx to index its fragments",
-            ))?;
-        let index = parse_sidx(&head[sidx.body..sidx.end], sidx.end as u64)?;
+            ));
+        }
 
         Ok(Self {
             trak,
             trex,
-            fragments: index.fragments,
-            total_ticks: index.total_ticks,
-            timescale: index.timescale,
+            fragments,
+            total_ticks,
+            timescale,
         })
     }
 
@@ -838,6 +919,55 @@ mod tests {
             first,
             sizes,
         }
+    }
+
+    /// A stream shaped the way Vimeo ships one: an init segment, then media segments
+    /// that each carry their own `sidx` describing only themselves.
+    ///
+    /// Returns the whole stream and, for each piece, the bytes a caller would hold and
+    /// the offset that piece begins at — an init segment and one head per media segment.
+    fn segmented(
+        cfg: &TrackConfig,
+        fragments: &[Vec<usize>],
+        frame_duration: u32,
+        fill: u8,
+    ) -> (Vec<u8>, Vec<(std::ops::Range<usize>, u64)>) {
+        let mut bytes = fmp4::write_init_segment(core::slice::from_ref(cfg));
+        // The init segment is a span in its own right: it holds the `moov` and no `sidx`.
+        let mut spans = vec![(0..bytes.len(), 0u64)];
+
+        let mut decode_time = 0u64;
+        let mut byte = fill;
+        for (i, sizes) in fragments.iter().enumerate() {
+            let samples: Vec<Sample> = sizes
+                .iter()
+                .map(|&len| {
+                    byte = byte.wrapping_add(17);
+                    Sample {
+                        data: vec![byte; len],
+                        duration: frame_duration,
+                        is_sync: i == 0,
+                        cts_offset: 0,
+                    }
+                })
+                .collect();
+            let body = fmp4::write_fragment((i + 1) as u32, cfg.track_id, decode_time, &samples);
+            decode_time += u64::from(frame_duration) * sizes.len() as u64;
+
+            // Each segment indexes itself and nothing else, starting from zero — which
+            // is the whole reason a single head cannot index the stream.
+            let index = sidx(
+                cfg.timescale,
+                &[body.len() as u64],
+                &[frame_duration * sizes.len() as u32],
+                Layout::default(),
+            );
+            let start = bytes.len();
+            bytes.extend_from_slice(&index);
+            spans.push((start..bytes.len(), start as u64));
+            bytes.extend_from_slice(&body);
+        }
+        (bytes, spans)
     }
 
     fn sidx(timescale: u32, sizes: &[u64], durations: &[u32], layout: Layout) -> Vec<u8> {
@@ -1457,5 +1587,82 @@ mod tests {
         };
         let json = serde_json::to_string(&read).unwrap();
         assert_eq!(serde_json::from_str::<FragmentRead>(&json).unwrap(), read);
+    }
+    /// An input that arrives as many self-indexing segments is indexed whole.
+    ///
+    /// A single `sidx` at the head is how YouTube and Bilibili ship a rendition, and
+    /// reading only that one indexed one segment of a Vimeo stream out of twenty-one:
+    /// a download that reported success having written three per cent of the video.
+    /// Every segment's index has to be read, and each one's offsets placed where that
+    /// segment actually sits.
+    #[test]
+    fn a_stream_of_self_indexing_segments_is_indexed_in_full() {
+        let video_cfg = video_cfg();
+        let audio_cfg = audio_cfg();
+        let (video_bytes, video_spans) =
+            segmented(&video_cfg, &[vec![600, 400], vec![500], vec![700]], 3000, 1);
+        let (audio_bytes, audio_spans) =
+            segmented(&audio_cfg, &[vec![300], vec![200], vec![250]], 1024, 90);
+
+        fn borrow<'a>(
+            bytes: &'a [u8],
+            spans: &[(std::ops::Range<usize>, u64)],
+        ) -> Vec<(&'a [u8], u64)> {
+            spans
+                .iter()
+                .map(|(r, at)| (&bytes[r.clone()], *at))
+                .collect()
+        }
+        let merger = FragmentMerger::from_segment_heads(
+            &borrow(&video_bytes, &video_spans),
+            &borrow(&audio_bytes, &audio_spans),
+        )
+        .expect("indexes every segment");
+
+        // Three fragments per side, not one.
+        assert_eq!(merger.reads().len(), 6, "every segment of both inputs");
+
+        // Every read must name bytes that exist and start at a real `moof`.
+        for read in merger.reads() {
+            let bytes = if read.source == Source::Video {
+                &video_bytes
+            } else {
+                &audio_bytes
+            };
+            let end = (read.offset + read.len) as usize;
+            assert!(end <= bytes.len(), "read runs past the stream: {read:?}");
+            let at = read.offset as usize;
+            assert_eq!(
+                &bytes[at + 4..at + 8],
+                b"moof",
+                "a read must start at a fragment"
+            );
+        }
+
+        // And the whole thing merges: every read fed in order produces a file.
+        let mut merger = merger;
+        let mut out = Vec::new();
+        for (i, read) in merger.reads().to_vec().iter().enumerate() {
+            let bytes = if read.source == Source::Video {
+                &video_bytes
+            } else {
+                &audio_bytes
+            };
+            let at = read.offset as usize;
+            out.extend_from_slice(
+                &merger
+                    .push(i, &bytes[at..at + read.len as usize])
+                    .expect("fragment is accepted"),
+            );
+        }
+        assert!(out.starts_with(b"\0\0\0"), "output begins with a box");
+        let kinds = box_types(&out);
+        assert!(kinds.contains(&"ftyp".to_string()), "{kinds:?}");
+        assert!(kinds.contains(&"moov".to_string()), "{kinds:?}");
+        assert_eq!(
+            kinds.iter().filter(|k| *k == "moof").count(),
+            6,
+            "one fragment per read, from both inputs: {kinds:?}"
+        );
     }
 }

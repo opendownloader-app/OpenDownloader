@@ -210,6 +210,45 @@ async function readFromSegments(
   return out;
 }
 
+/**
+ * The front of the init segment and of every media segment, flattened for the core.
+ *
+ * Enough of each piece to reach its `sidx`. 16 KiB is generous — an index box for one
+ * segment is a few hundred bytes — and it is read through the same segment reader as
+ * everything else, so a piece already in hand costs no request.
+ */
+async function segmentHeads(
+  stream: ExtractedStream,
+  signal?: AbortSignal,
+): Promise<{ blob: Uint8Array; lens: Uint32Array; offsets: Float64Array }> {
+  const HEAD = 16 * 1024;
+  const initLength = stream.segments?.[0]?.offset ?? 0;
+  const pieces: { start: number; length: number }[] = [
+    { start: 0, length: initLength },
+    ...(stream.segments ?? []).map((s) => ({
+      start: s.offset,
+      length: Math.min(HEAD, s.size),
+    })),
+  ];
+
+  const parts: Uint8Array[] = [];
+  for (const p of pieces) {
+    parts.push(await readFromSegments(stream, p.start, p.length, signal));
+  }
+
+  const blob = new Uint8Array(parts.reduce((n, b) => n + b.length, 0));
+  let at = 0;
+  for (const b of parts) {
+    blob.set(b, at);
+    at += b.length;
+  }
+  return {
+    blob,
+    lens: Uint32Array.from(parts.map((b) => b.length)),
+    offsets: Float64Array.from(pieces.map((p) => p.start)),
+  };
+}
+
 /** The top-level box types present at the front of a stream. */
 function boxTypes(head: Uint8Array): string[] {
   const view = new DataView(head.buffer, head.byteOffset, head.byteLength);
@@ -365,7 +404,22 @@ export async function runMerge(
     boxTypes(audioHead).includes("sidx");
 
   let merger: Merger;
-  if (fragmented) {
+  if (video.segments && audio.segments) {
+    // Each segment indexes only itself, so one head cannot describe the stream. Every
+    // segment's `sidx` is read, at the offset that segment occupies.
+    const [videoSpans, audioSpans] = await Promise.all([
+      segmentHeads(video, opts.signal),
+      segmentHeads(audio, opts.signal),
+    ]);
+    merger = core.FragmentMerger.fromSegmentHeads(
+      videoSpans.blob,
+      videoSpans.lens,
+      videoSpans.offsets,
+      audioSpans.blob,
+      audioSpans.lens,
+      audioSpans.offsets,
+    ) as unknown as Merger;
+  } else if (fragmented) {
     merger = core.FragmentMerger.fromHeads(
       videoHead,
       audioHead,

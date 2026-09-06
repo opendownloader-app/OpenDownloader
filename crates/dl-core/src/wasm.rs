@@ -637,6 +637,58 @@ impl WasmFragmentMerger {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    /// Index inputs that arrive as several self-indexing pieces.
+    ///
+    /// Each side is passed flat — every piece's bytes concatenated, the length of each,
+    /// and the offset each begins at in its own stream — because a list of byte arrays
+    /// does not cross this boundary cheaply and the flat form needs no allocation on
+    /// either side beyond the slices it is given.
+    ///
+    /// Used where a rendition is an init segment plus media segments that each carry
+    /// their own `sidx`, which is how Vimeo's adaptive format ships one.
+    #[wasm_bindgen(js_name = fromSegmentHeads)]
+    pub fn from_segment_heads(
+        video_blob: &[u8],
+        video_lens: &[u32],
+        video_offsets: &[f64],
+        audio_blob: &[u8],
+        audio_lens: &[u32],
+        audio_offsets: &[f64],
+    ) -> Result<WasmFragmentMerger, JsValue> {
+        fn spans<'a>(
+            blob: &'a [u8],
+            lens: &[u32],
+            offsets: &[f64],
+        ) -> Result<Vec<(&'a [u8], u64)>, JsValue> {
+            if lens.len() != offsets.len() {
+                return Err(JsValue::from_str("a span is missing its length or offset"));
+            }
+            let mut out = Vec::with_capacity(lens.len());
+            let mut at = 0usize;
+            for (len, offset) in lens.iter().zip(offsets) {
+                let len = *len as usize;
+                let end = at
+                    .checked_add(len)
+                    .filter(|e| *e <= blob.len())
+                    .ok_or_else(|| {
+                        JsValue::from_str("the span lengths do not add up to the bytes given")
+                    })?;
+                out.push((&blob[at..end], *offset as u64));
+                at = end;
+            }
+            Ok(out)
+        }
+
+        let video = spans(video_blob, video_lens, video_offsets)?;
+        let audio = spans(audio_blob, audio_lens, audio_offsets)?;
+        dl_container::FragmentMerger::from_segment_heads(&video, &audio)
+            .map(|inner| WasmFragmentMerger {
+                inner,
+                hasher: crate::integrity::Hasher::new(),
+            })
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     /// The `moof`+`mdat` ranges to fetch, interleaved by decode time, as JSON
     /// `[{"source":"Video"|"Audio","offset":n,"len":n}]`.
     pub fn reads(&self) -> String {
