@@ -193,6 +193,25 @@ fn parse_config(root: &Value, id: Option<&str>) -> Result<Extraction, SiteError>
 
     let files = root.pointer("/request/files").ok_or_else(shape)?;
 
+    // A DRM video is refused here rather than at download time. Vimeo describes it
+    // plainly — `request.drm` carries the FairPlay, Widevine and PlayReady licence
+    // URLs, and every playlist it nominates is served from a `/drm/` path whose media
+    // playlists carry `#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://drm"`. There is no
+    // unprotected rendition to fall back to: the `fallback_url`s go through `/drm/` too,
+    // and `progressive` is empty.
+    //
+    // Extraction used to succeed on these and offer an "HLS stream (adaptive)" that
+    // could only fail once the download reached the first key line. Offering a choice
+    // that cannot work is worse than saying so: it costs a click, a wait and a failure
+    // to learn what the config stated up front.
+    if is_drm_protected(root, files) {
+        return Err(SiteError::Unavailable(format!(
+            "\"{title}\" is a DRM-protected Vimeo video. Vimeo serves it only through \
+             Widevine, PlayReady or FairPlay, and OpenDownloader does not break DRM on \
+             any site. Nothing here can download it."
+        )));
+    }
+
     let mut options = Vec::new();
     let mut videos = Vec::new();
 
@@ -385,6 +404,40 @@ fn dimension(v: Option<&Value>) -> Option<u32> {
         _ => None,
     }
     .map(|n| n as u32)
+}
+
+/// Whether this config describes a DRM-protected video.
+///
+/// Two signals, either of which is enough, because they can appear apart. `request.drm`
+/// is Vimeo stating it outright — an object of licence servers. The `/drm/` path segment
+/// is the same fact expressed in the URL, and it is present on configs whose `drm` key
+/// is absent or empty.
+///
+/// Deliberately not a check of the playlist body: that would mean fetching a stream to
+/// learn it cannot be used, when the config already said so.
+fn is_drm_protected(root: &Value, files: &Value) -> bool {
+    let declared = root
+        .pointer("/request/drm")
+        .is_some_and(|d| d.is_object() && d.as_object().is_some_and(|o| !o.is_empty()));
+    if declared {
+        return true;
+    }
+    // Any nominated playlist served from a `/drm/` path. Checked across both protocols
+    // and every CDN, since the default is only one of several the client may pick.
+    ["hls", "dash"].iter().any(|proto| {
+        files
+            .pointer(&format!("/{proto}/cdns"))
+            .and_then(Value::as_object)
+            .is_some_and(|cdns| {
+                cdns.values().any(|cdn| {
+                    cdn.as_object().is_some_and(|entry| {
+                        entry
+                            .values()
+                            .any(|v| v.as_str().is_some_and(|u| u.contains("/drm/")))
+                    })
+                })
+            })
+    })
 }
 
 /// The master playlist URL, from the CDN the config itself nominates.
@@ -629,6 +682,44 @@ mod tests {
             .iter()
             .any(|(k, v)| k == "Referer" && v == REFERER));
         assert_eq!(reqs[0].body, None);
+    }
+
+    /// Vimeo stating DRM outright, in `request.drm`.
+    const DRM_DECLARED: &str = r#"{"video":{"title":"Protected","duration":47},
+"request":{"drm":{"fairplay":{"license_url":"https://vimeo.test/fp"}},
+"files":{"hls":{"default_cdn":"a","cdns":{"a":{"url":"https://cdn.test/av/playlist.m3u8"}}}}}}"#;
+
+    /// The same fact in the URL, on a config that carries no `drm` key.
+    const DRM_IN_PATH: &str = r#"{"video":{"title":"Protected","duration":47},
+"request":{"files":{"hls":{"default_cdn":"a","cdns":{"a":
+{"url":"https://cdn.test/v2/playlist/drm/cbcs,derivedv2,abc/av/playlist.m3u8"}}}}}}"#;
+
+    /// A DRM video is refused at extraction, not left to fail mid-download.
+    ///
+    /// Both signals are checked because they appear apart: a live config for
+    /// `vimeo.com/1086925006` carried both, and the trimmed fixture above carries
+    /// neither. Offering an "HLS stream" that can only fail at its first key line costs
+    /// a click, a wait and a failure to learn what the config already stated.
+    #[test]
+    fn a_drm_video_is_refused_with_a_reason_rather_than_offered() {
+        for (name, config) in [("declared", DRM_DECLARED), ("in the path", DRM_IN_PATH)] {
+            let err = extract(config).expect_err(&format!("{name} should be refused"));
+            match err {
+                SiteError::Unavailable(m) => {
+                    assert!(m.contains("DRM-protected"), "{name}: {m}");
+                    assert!(m.contains("Protected"), "{name} should name the video: {m}");
+                }
+                other => panic!("{name}: expected Unavailable, got {other:?}"),
+            }
+        }
+    }
+
+    /// A config with neither signal is untouched by the DRM check.
+    #[test]
+    fn an_ordinary_config_is_not_mistaken_for_drm() {
+        // The captured fixture has no `drm` key and no `/drm/` path, and must still
+        // extract — a DRM check that catches everything would be worse than none.
+        assert!(extract(CONFIG).is_ok());
     }
 
     #[test]
