@@ -468,7 +468,17 @@ export async function extract(
                 ? `${new URL(request.url).hostname} refused this request. It requires a header ` +
                     "a web page is not allowed to send, so this site needs the browser " +
                     "extension, or a relay you run yourself."
-                : `${new URL(request.url).hostname} answered ${response.status}`,
+                : response.status === 403
+                  ? // A 403 from a site's own player API is nearly always the video
+                    // being restricted rather than anything wrong at this end: Vimeo
+                    // returns it for clips playable only on their own page or on
+                    // approved domains, and no header or retry changes that. Saying so
+                    // stops the reader debugging their setup.
+                    `${new URL(request.url).hostname} refused this video (403). It is ` +
+                    "usually restricted by whoever posted it — playable on the site " +
+                    "itself, or only on domains they approved. Anything found on the " +
+                    "page while it plays is listed below and may still be downloadable."
+                  : `${new URL(request.url).hostname} answered ${response.status}`,
             );
           }
           bodies.push(await response.text());
