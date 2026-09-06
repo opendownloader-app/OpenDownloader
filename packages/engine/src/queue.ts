@@ -14,7 +14,12 @@ import { PausedError, runJob, type RunOptions } from "./engine";
 import { getJob, listJobs, updateJob } from "./jobs";
 import type { Platform } from "./platform";
 import { getSettings } from "./settings";
-import { canOpenSinkSilently, createSink, createSinkInteractive, type Sink } from "./sinks";
+import {
+  canOpenSinkSilently,
+  createSink,
+  createSinkInteractive,
+  type Sink,
+} from "./sinks";
 import type { Job, Progress } from "./types";
 
 export interface QueueEvents {
@@ -29,6 +34,23 @@ const MIME_FOR_KIND: Record<Job["kind"], string> = {
   progressive: "application/octet-stream",
   merge: "video/mp4",
 };
+
+/**
+ * The `Referer` a media request should carry, given the page it was found on.
+ *
+ * The origin, not the full URL: it is what these CDNs check, and the full path of the
+ * page someone was watching is more than the request needs to carry.
+ */
+function refererFor(pageUrl: string | undefined): [string, string][] {
+  if (!pageUrl) return [];
+  try {
+    const { origin } = new URL(pageUrl);
+    if (!origin.startsWith("http")) return [];
+    return [["Referer", `${origin}/`]];
+  } catch {
+    return [];
+  }
+}
 
 export class Queue {
   private readonly running = new Map<string, AbortController>();
@@ -96,7 +118,8 @@ export class Queue {
   async resumeAll(): Promise<void> {
     this.paused = false;
     for (const job of await listJobs()) {
-      if (job.status === "paused") await updateJob(job.id, { status: "queued" });
+      if (job.status === "paused")
+        await updateJob(job.id, { status: "queued" });
     }
     this.events.onChange();
     await this.tick();
@@ -106,7 +129,8 @@ export class Queue {
   async retryFailed(): Promise<void> {
     this.paused = false;
     for (const job of await listJobs()) {
-      if (job.status === "error") await updateJob(job.id, { status: "queued", error: null });
+      if (job.status === "error")
+        await updateJob(job.id, { status: "queued", error: null });
     }
     this.events.onChange();
     await this.tick();
@@ -159,7 +183,8 @@ export class Queue {
       mime: MIME_FOR_KIND[job.kind],
       // A merge has no resume point (see `runMerge`), so it always opens a fresh file
       // rather than continuing into one that holds half an older attempt.
-      resuming: job.kind !== "merge" && job.receivedBytes > 0 && Boolean(job.stateJson),
+      resuming:
+        job.kind !== "merge" && job.receivedBytes > 0 && Boolean(job.stateJson),
       platform: this.platform,
     };
   }
@@ -183,18 +208,32 @@ export class Queue {
       // A site extractor may require headers `fetch` refuses to set. Install them for
       // the life of this job and take them down afterwards, so a rule never outlives
       // the download that needed it.
-      if (fresh.requestHeaders?.length && this.platform.applyRequestHeaders) {
-        const urls = fresh.mergeStreams
-          ? fresh.mergeStreams.map((s) => s.url)
-          : [fresh.url];
-        releaseHeaders = await this.platform.applyRequestHeaders(urls, fresh.requestHeaders);
+      const urls = fresh.mergeStreams
+        ? fresh.mergeStreams.map((s) => s.url)
+        : [fresh.url];
+
+      // A candidate the sniffer found carries no headers of its own — it was observed,
+      // not negotiated. What it does carry is the page it was seen on, and that is
+      // precisely what several CDNs check: TikTok's, Douyin's and Meta's all answer 403
+      // to a media request with no `Referer`, which is how a detected video downloads to
+      // nothing. `fetch` cannot set that header; a `declarativeNetRequest` rule can, and
+      // being able to is a large part of why the extension reaches sites the web app
+      // cannot. An extractor's own headers still win — it knows more than we can infer.
+      const headers: [string, string][] = fresh.requestHeaders?.length
+        ? fresh.requestHeaders
+        : refererFor(fresh.pageUrl);
+
+      if (headers.length && this.platform.applyRequestHeaders) {
+        releaseHeaders = await this.platform.applyRequestHeaders(urls, headers);
       }
 
       await runJob(fresh, sink, options);
     } catch (e) {
       // Pausing is a user decision, not a failure — the distinction matters
       // because an errored job shows a red message and a paused one does not.
-      const paused = e instanceof PausedError || (e as { name?: string }).name === "AbortError";
+      const paused =
+        e instanceof PausedError ||
+        (e as { name?: string }).name === "AbortError";
       await updateJob(job.id, {
         status: paused ? "paused" : "error",
         error: paused ? null : describe(e),
