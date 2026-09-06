@@ -1,0 +1,676 @@
+//! Per-site extraction: turning a page URL into downloadable media.
+//!
+//! The passive sniffer in the extension sees whatever a page fetches, and for a great
+//! many sites that is enough. The large video platforms are not among them: they hand
+//! their player a JSON blob describing every rendition, and the player then fetches
+//! segments the sniffer sees only as anonymous byte ranges. To offer the user "1080p" or
+//! "just the audio" instead of "seg-0001.m4s", something has to read that blob.
+//!
+//! # The seam, unchanged
+//!
+//! Rust decides, TypeScript fetches. An [`Extractor`] is a **state machine that performs
+//! no I/O**: it says what it needs, the host performs the fetch or reads the page, and
+//! feeds the bytes back. That is what keeps every site's parsing assertable against a
+//! captured fixture instead of a live network, which matters more here than anywhere
+//! else in the codebase — these are the parts that rot.
+//!
+//! # Why reading the page beats scraping it
+//!
+//! Fetching these sites from outside a browser mostly fails: TikTok answers a bot wall,
+//! Bilibili answers `412`, Facebook redirects to a login. Inside the extension none of
+//! that applies, because the page has *already loaded* and already holds the data — the
+//! player could not play without it. So the preferred input is [`Need::PageState`], and
+//! network fetches are the fallback rather than the default.
+
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "platform-sites")]
+pub mod bilibili;
+pub mod dailymotion;
+#[cfg(feature = "platform-sites")]
+pub mod douyin;
+pub mod generic;
+#[cfg(feature = "platform-sites")]
+pub mod meta;
+#[cfg(feature = "platform-sites")]
+pub mod tiktok;
+pub mod twitch;
+pub mod twitter;
+pub mod vimeo;
+#[cfg(feature = "platform-sites")]
+pub mod weixin;
+#[cfg(feature = "platform-sites")]
+pub mod youtube;
+
+/// What kind of stream one downloadable option is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamKind {
+    /// One file carrying both picture and sound. Nothing to merge.
+    Muxed,
+    /// Picture only. Needs an [`StreamKind::AudioOnly`] partner to be watchable.
+    VideoOnly,
+    /// Sound only. Downloadable on its own as an audio file.
+    AudioOnly,
+}
+
+/// One fetchable stream belonging to a [`MediaOption`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stream {
+    pub url: String,
+    pub kind: StreamKind,
+    /// The container/codec string the site reported, for display and for choosing an
+    /// output extension. Never trusted for parsing decisions.
+    pub mime: Option<String>,
+    /// Bytes, when the site states it. Lets the UI show a size before starting.
+    pub size: Option<u64>,
+    /// Headers the fetch must carry. A `Referer` is the usual one, and on several of
+    /// these sites its absence is the entire difference between 200 and 403.
+    #[serde(default)]
+    pub headers: Vec<(String, String)>,
+    /// How much of this stream to ask for in one request, when the host cares.
+    ///
+    /// Set where a host rate-limits large sequential reads. Google's media servers answer
+    /// `403` to an 8 MiB range and `206` to a 1 MiB one — but the mechanism is a per-URL
+    /// limiter rather than a size ceiling, since after enough large reads every size is
+    /// refused and a freshly issued URL is immediately fine again. So this is the request
+    /// size the host tolerates, and a `403` part-way through is a throttle to back off
+    /// from rather than a refusal to give up on.
+    #[serde(default)]
+    pub max_chunk: Option<u64>,
+}
+
+/// One thing the user can choose to download.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaOption {
+    /// What the UI shows: "1080p60", "Audio only · 128 kbps".
+    pub label: String,
+    /// Sort key, descending. Video height, or bitrate for audio-only options.
+    pub rank: u64,
+    /// One stream for a muxed option, two when video and audio must be merged.
+    pub streams: Vec<Stream>,
+    /// Suggested filename, extension included, derived from the media's own title.
+    pub filename: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub duration_ms: Option<u64>,
+}
+
+/// A resource the extractor needs before it can continue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Request {
+    pub url: String,
+    /// `GET` or `POST`.
+    pub method: String,
+    #[serde(default)]
+    pub headers: Vec<(String, String)>,
+    /// Present only for `POST`.
+    pub body: Option<String>,
+}
+
+impl Request {
+    pub fn get(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            method: "GET".into(),
+            headers: Vec::new(),
+            body: None,
+        }
+    }
+
+    pub fn post(url: impl Into<String>, body: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            method: "POST".into(),
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body: Some(body.into()),
+        }
+    }
+
+    pub fn with_header(mut self, name: &str, value: &str) -> Self {
+        self.headers.push((name.into(), value.into()));
+        self
+    }
+}
+
+/// What the extractor wants next.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Need {
+    /// Fetch these and feed the bodies back, in order.
+    Fetch(Vec<Request>),
+    /// Read the loaded page's own document and hand back its HTML.
+    ///
+    /// The extension satisfies this by injecting a reader into the tab; the web app
+    /// cannot, and turns it into an ordinary fetch — which is exactly why the web app
+    /// fails on the sites that block outsiders, and why the extension is the answer
+    /// there.
+    PageState,
+}
+
+/// Where an extractor has got to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Step {
+    /// Not finished; satisfy this and call `feed`.
+    Need(Need),
+    /// Finished. Options are sorted best-first.
+    Done(Extraction),
+}
+
+/// One video rendition the user can choose.
+///
+/// Separate from [`MediaOption`] because they answer different questions. An option is
+/// "give me 1080p" — a ready-made pairing for the common case. A [`VideoChoice`] is one
+/// half of "give me 1080p *with this audio*", which is the case a site with several audio
+/// bitrates or several languages makes worth asking about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VideoChoice {
+    /// Stable within one extraction; how a UI names the pairing it wants.
+    pub id: String,
+    /// What the UI shows: "1080p60 · AVC".
+    pub label: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub fps: Option<u32>,
+    pub bitrate: Option<u64>,
+    pub codec: Option<String>,
+    pub size: Option<u64>,
+    pub stream: Stream,
+    /// True when this rendition already carries sound, so no audio need be chosen.
+    pub has_audio: bool,
+    /// The highest quality that can actually be delivered as one playable file.
+    ///
+    /// Not simply the largest. YouTube's top renditions are VP9 and AV1 in WebM, and this
+    /// build joins video to audio only inside MP4 — so recommending 2160p VP9 would
+    /// recommend something that cannot be given sound. See [`Extraction::rank_choices`].
+    pub best: bool,
+    /// `"mp4"`, `"webm"`, or whatever the mime said. Filled in by `rank_choices`.
+    #[serde(default)]
+    pub container: Option<String>,
+    /// Whether this rendition can be joined to an audio track by this build.
+    ///
+    /// The test is the **container**, not the codec, and that is worth stating because it
+    /// looks too permissive: the fragmented merger copies each input's track description
+    /// through verbatim rather than re-describing it, so it never needs to understand the
+    /// codec at all. Checked live on 2026-09-05 — an AV1 video and an AAC track merged
+    /// into a file `ffprobe` reads as `av1` plus `aac`, and H.264 likewise, while a WebM
+    /// video failed exactly as this flag predicts.
+    ///
+    /// A WebM rendition is still perfectly downloadable on its own; it is only the
+    /// *joining* that is MP4-only, because that is the container `dl-container` writes.
+    #[serde(default)]
+    pub mergeable: bool,
+}
+
+/// One audio rendition the user can choose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioChoice {
+    pub id: String,
+    /// What the UI shows: "128 kbps · AAC" or "English · 256 kbps".
+    pub label: String,
+    pub bitrate: Option<u64>,
+    pub codec: Option<String>,
+    pub language: Option<String>,
+    pub size: Option<u64>,
+    pub stream: Stream,
+    /// The highest quality that can actually be joined to the recommended video.
+    pub best: bool,
+    /// `"mp4"`, `"webm"`, or whatever the mime said. Filled in by `rank_choices`.
+    #[serde(default)]
+    pub container: Option<String>,
+    /// Whether this track can be joined to a video by this build. True for MP4/AAC.
+    #[serde(default)]
+    pub mergeable: bool,
+}
+
+/// Everything an extractor learned.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Extraction {
+    pub site: String,
+    pub title: String,
+    /// Ready-made pairings, best first. What a UI offers when the user just wants "1080p".
+    pub options: Vec<MediaOption>,
+    /// Every video rendition, best first, for choosing picture and sound separately.
+    ///
+    /// A site that only serves muxed files lists them here with `has_audio: true`, so a
+    /// UI can treat every site the same way and simply not show an audio picker when
+    /// nothing needs pairing.
+    #[serde(default)]
+    pub videos: Vec<VideoChoice>,
+    /// Every audio rendition, best first. Empty when the site muxes its audio in.
+    #[serde(default)]
+    pub audios: Vec<AudioChoice>,
+    /// Subtitle tracks the site exposes, if any.
+    #[serde(default)]
+    pub subtitles: Vec<SubtitleTrack>,
+}
+
+impl Extraction {
+    /// Sort both choice lists best-first, work out what can be joined, and mark the best
+    /// deliverable option in each.
+    ///
+    /// Called by every extractor rather than each doing its own sorting, so "best" means
+    /// one thing across the whole product and a site cannot accidentally recommend its
+    /// worst rendition. Ordering is by height, then width, then frame rate, then bitrate,
+    /// then declared size: height is what a person means by "1080p" and is the one figure
+    /// every site states, and the rest break the ties a 1080p at 2 Mbps and a 1080p60 at
+    /// 6 Mbps would otherwise leave to chance.
+    ///
+    /// # Why "best" is not simply "largest"
+    ///
+    /// On YouTube the top renditions are VP9 and AV1 in WebM, and the largest audio is
+    /// Opus — while this build joins a separate video and audio only inside MP4, because
+    /// that is the container `dl-container` writes. Flagging 2160p VP9 as best would
+    /// recommend a file that cannot be given sound, and the person who clicked the
+    /// obvious button would get a silent video.
+    ///
+    /// So `best` marks the highest rendition that can actually be **delivered complete**:
+    /// one that already carries its own audio, or an MP4 with an MP4 audio track to join
+    /// it to. Every other rendition stays in the list and stays choosable — the point is
+    /// to make the default right, not to hide anything.
+    pub fn rank_choices(&mut self) {
+        // Height first, not pixel count. Several sites — Vimeo, Dailymotion, Twitch —
+        // state a height and no width at all, and multiplying the two ties every one of
+        // their renditions at zero, leaving the order to whatever the extractor happened
+        // to push. Height is the number those sites do give, and it is also the number a
+        // person means by "1080p", so it is the right primary key; width only breaks ties
+        // between two renditions of the same height.
+        self.videos.sort_by(|a, b| {
+            b.height
+                .unwrap_or(0)
+                .cmp(&a.height.unwrap_or(0))
+                .then(b.width.unwrap_or(0).cmp(&a.width.unwrap_or(0)))
+                .then(b.fps.unwrap_or(0).cmp(&a.fps.unwrap_or(0)))
+                .then(b.bitrate.unwrap_or(0).cmp(&a.bitrate.unwrap_or(0)))
+                .then(b.size.unwrap_or(0).cmp(&a.size.unwrap_or(0)))
+        });
+        self.audios.sort_by(|a, b| {
+            b.bitrate
+                .unwrap_or(0)
+                .cmp(&a.bitrate.unwrap_or(0))
+                .then(b.size.unwrap_or(0).cmp(&a.size.unwrap_or(0)))
+        });
+        for v in &mut self.videos {
+            v.container = container_of(v.stream.mime.as_deref());
+            v.mergeable = v.has_audio || v.container.as_deref() == Some("mp4");
+            v.best = false;
+        }
+        for a in &mut self.audios {
+            a.container = container_of(a.stream.mime.as_deref());
+            a.mergeable = a.container.as_deref() == Some("mp4");
+            a.best = false;
+        }
+
+        // The best audio to join with, if joining is needed at all.
+        let joinable_audio = self.audios.iter().position(|a| a.mergeable);
+
+        // The best video that can be delivered complete: one that carries its own sound,
+        // or an MP4 with an MP4 audio track available to join to it.
+        let best_video = self
+            .videos
+            .iter()
+            .position(|v| v.has_audio || (v.mergeable && joinable_audio.is_some()))
+            // Nothing is deliverable complete — a WebM-only stream with no MP4 audio, say.
+            // Recommend the best there is rather than nothing, since a video-only download
+            // is still a download and the UI says what it is.
+            .or(if self.videos.is_empty() {
+                None
+            } else {
+                Some(0)
+            });
+
+        if let Some(i) = best_video {
+            self.videos[i].best = true;
+        }
+        if let Some(i) = joinable_audio.or(if self.audios.is_empty() {
+            None
+        } else {
+            Some(0)
+        }) {
+            self.audios[i].best = true;
+        }
+    }
+
+    /// The recommended video: the best that can be delivered complete.
+    pub fn best_video(&self) -> Option<&VideoChoice> {
+        self.videos
+            .iter()
+            .find(|v| v.best)
+            .or_else(|| self.videos.first())
+    }
+
+    /// The recommended audio.
+    pub fn best_audio(&self) -> Option<&AudioChoice> {
+        self.audios
+            .iter()
+            .find(|a| a.best)
+            .or_else(|| self.audios.first())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubtitleTrack {
+    pub label: String,
+    pub language: Option<String>,
+    pub url: String,
+    /// `vtt`, `srt`, `json3`, `ttml` — what the URL actually returns.
+    pub format: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SiteError {
+    /// No extractor claims this URL.
+    Unsupported,
+    /// The response did not contain what this site is documented to return. Carries the
+    /// site name so a failing extractor is identifiable without a stack trace — these
+    /// break when a site changes, and the message is the bug report.
+    Shape(String),
+    /// The site said the media exists but cannot be played: private, deleted,
+    /// age-gated, region-locked, or behind a login.
+    Unavailable(String),
+    /// The stream is encrypted. Refused everywhere, on every host.
+    Encrypted,
+}
+
+impl core::fmt::Display for SiteError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SiteError::Unsupported => f.write_str("no extractor handles this URL"),
+            SiteError::Shape(site) => write!(
+                f,
+                "{site} did not return what was expected — the site has probably changed"
+            ),
+            SiteError::Unavailable(why) => write!(f, "{why}"),
+            SiteError::Encrypted => f.write_str(
+                "this stream is encrypted; opendownloader does not download protected streams",
+            ),
+        }
+    }
+}
+
+/// One site's extraction logic.
+///
+/// Implementations are pure: `start` and `feed` may look at their inputs and their own
+/// state and nothing else. No clock, no network, no randomness — which is what lets a
+/// captured response be replayed as a test.
+pub trait Extractor {
+    /// The name that appears in errors and in the UI.
+    fn site(&self) -> &'static str;
+    /// What this extractor needs first.
+    fn start(&mut self, url: &str) -> Result<Step, SiteError>;
+    /// Feed the bodies of the previous [`Need`], in the order requested.
+    fn feed(&mut self, bodies: &[&str]) -> Result<Step, SiteError>;
+
+    /// Whether a [`Need::PageState`] may be satisfied by *fetching* the page instead of
+    /// reading it out of a loaded tab.
+    ///
+    /// The two are not the same document. A tab's copy has been through the page's own
+    /// scripts; a fetched copy is the server's first response, and on most of these sites
+    /// the media is not in it. Answering `true` is a promise that this extractor either
+    /// finds what it needs in that thinner copy or has another way to continue from it —
+    /// not merely that it will fail politely.
+    ///
+    /// Default `false`, so a host without a tab is told plainly to use the extension
+    /// rather than shown a parse failure that reads like the site broke.
+    fn accepts_fetched_page(&self) -> bool {
+        false
+    }
+}
+
+/// Pick the extractor for a URL, or `None` when the passive sniffer should handle it.
+pub fn extractor_for(url: &str) -> Option<Box<dyn Extractor>> {
+    let host = crate::policy::host_of(url)?;
+    for (matches, build) in PLATFORM_REGISTRY.iter().chain(GENERIC_REGISTRY) {
+        if matches(&host) {
+            return Some(build(url));
+        }
+    }
+    None
+}
+
+/// Whether this URL's extractor can work from a fetched page rather than a loaded tab.
+///
+/// The web app asks this to decide between fetching the page through the relay and
+/// telling the user, plainly, that this one needs the extension.
+pub fn site_accepts_fetched_page(url: &str) -> bool {
+    extractor_for(url).is_some_and(|e| e.accepts_fetched_page())
+}
+
+/// Whether any extractor claims this URL.
+pub fn is_supported(url: &str) -> bool {
+    extractor_for(url).is_some()
+}
+
+/// The name of the site that would handle this URL, for the UI.
+pub fn site_for(url: &str) -> Option<&'static str> {
+    extractor_for(url).map(|e| e.site())
+}
+
+type Matcher = fn(&str) -> bool;
+/// Built from the URL, not from nothing.
+///
+/// `Meta` covers Instagram and Facebook with one implementation, so it cannot say which
+/// of the two it is until it has seen a URL — and [`site_for`] is asked exactly that,
+/// before `start` runs. Handing the URL to the constructor is what lets every extractor
+/// name itself correctly from the moment it exists.
+type Builder = fn(&str) -> Box<dyn Extractor>;
+
+/// The large-platform extractors, compiled in only with the `platform-sites` feature.
+///
+/// The feature exists because there are genuinely two products here, and the difference
+/// is a distribution constraint rather than a technical one. The Chrome Web Store's
+/// developer policy prohibits extensions that download from YouTube, and Edge mirrors it
+/// — so a build intended for those stores must not contain this code, and a build
+/// distributed from the project's own site may. Making that a compile-time feature
+/// rather than a runtime setting is deliberate: a reviewer can verify a store build does
+/// not contain the code, which no setting could demonstrate.
+///
+/// `generic` is not in here. It reads `<video>` tags and Open Graph headers from pages
+/// that simply state their media, which every store permits.
+#[cfg(feature = "platform-sites")]
+const PLATFORM_REGISTRY: &[(Matcher, Builder)] = &[
+    (youtube::matches, |_| Box::new(youtube::YouTube::new())),
+    (bilibili::matches, |_| Box::new(bilibili::Bilibili::new())),
+    (tiktok::matches, |_| Box::new(tiktok::TikTok::new())),
+    (douyin::matches, |_| Box::new(douyin::Douyin::new())),
+    (meta::matches, meta::build),
+    (weixin::matches, |_| Box::new(weixin::Weixin::new())),
+];
+
+#[cfg(not(feature = "platform-sites"))]
+const PLATFORM_REGISTRY: &[(Matcher, Builder)] = &[];
+
+/// The extractors present in every build, store or otherwise.
+///
+/// Separate from [`PLATFORM_REGISTRY`] because the reason that one is gated does not
+/// apply here. Chrome's developer policy names YouTube; nothing in it, or in Edge's,
+/// speaks to Vimeo, Dailymotion, Twitch clips or a post on X. Gating these too would
+/// make the store build worse for no reason a reviewer would recognise.
+///
+/// Registration order is match order, so `generic` comes last: a URL none of the
+/// dedicated extractors claims falls through to the page reader, and one nothing claims
+/// at all falls through to the passive sniffer — the right behaviour for the long tail of
+/// ordinary sites.
+const GENERIC_REGISTRY: &[(Matcher, Builder)] = &[
+    (vimeo::matches, |_| Box::new(vimeo::Vimeo::new())),
+    (dailymotion::matches, |_| {
+        Box::new(dailymotion::Dailymotion::new())
+    }),
+    (twitch::matches, |_| Box::new(twitch::Twitch::new())),
+    (twitter::matches, |_| Box::new(twitter::Twitter::new())),
+    (generic::matches, |_| Box::new(generic::Generic::new())),
+];
+
+/// Whether this build carries the large-platform extractors.
+pub const fn has_platform_sites() -> bool {
+    cfg!(feature = "platform-sites")
+}
+
+/// The container a mime type names, lowercased: `"mp4"`, `"webm"`, or `None`.
+///
+/// Deliberately coarse. What the rest of the code needs to know is whether two streams
+/// can be joined, and that question is answered by the container rather than by the exact
+/// codec string a site chose to write.
+pub fn container_of(mime: Option<&str>) -> Option<String> {
+    let mime = mime?.to_ascii_lowercase();
+    let base = mime.split(';').next().unwrap_or("").trim().to_string();
+    let subtype = base.rsplit('/').next()?.to_string();
+    Some(match subtype.as_str() {
+        "mp4" | "m4a" | "x-m4a" | "quicktime" => "mp4".to_string(),
+        "webm" | "x-matroska" => "webm".to_string(),
+        other => other.to_string(),
+    })
+}
+
+/// Suffix match on a host, boundary-aware — the same rule `policy` uses, so a lookalike
+/// domain never matches a site extractor either.
+pub fn host_is(host: &str, domain: &str) -> bool {
+    host == domain
+        || (host.len() > domain.len()
+            && host.ends_with(domain)
+            && host.as_bytes()[host.len() - domain.len() - 1] == b'.')
+}
+
+/// Strip characters a filesystem will not take, and bound the length.
+///
+/// Shared by every extractor because they all derive a filename from a title the site
+/// supplied, and a title is arbitrary user input on every one of these platforms.
+pub fn safe_filename(title: &str, extension: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if (c as u32) < 0x20 => ' ',
+            c => c,
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_start_matches('.').trim();
+    let stem: String = if trimmed.is_empty() {
+        "video".to_string()
+    } else {
+        trimmed.chars().take(120).collect()
+    };
+    format!("{}.{extension}", stem.trim_end())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renditions_that_state_no_width_still_rank_by_height() {
+        // Vimeo, Dailymotion and Twitch all report a height and no width. Ranking by
+        // pixel count would tie every one of them at zero and leave the recommendation to
+        // whichever order the extractor happened to build its list in.
+        let stream = || Stream {
+            url: "https://x/y.mp4".into(),
+            kind: StreamKind::Muxed,
+            mime: Some("video/mp4".into()),
+            size: None,
+            headers: Vec::new(),
+            max_chunk: None,
+        };
+        let choice = |id: &str, height: u32| VideoChoice {
+            id: id.into(),
+            label: format!("{height}p"),
+            width: None,
+            height: Some(height),
+            fps: None,
+            bitrate: None,
+            codec: None,
+            size: None,
+            stream: stream(),
+            has_audio: true,
+            best: false,
+            container: None,
+            mergeable: false,
+        };
+
+        let mut extraction = Extraction {
+            site: "test".into(),
+            title: "t".into(),
+            options: Vec::new(),
+            // Deliberately worst-first, which is what a naive extractor produces.
+            videos: vec![choice("a", 360), choice("b", 1080), choice("c", 720)],
+            audios: Vec::new(),
+            subtitles: Vec::new(),
+        };
+        extraction.rank_choices();
+
+        let order: Vec<&str> = extraction.videos.iter().map(|v| v.id.as_str()).collect();
+        assert_eq!(order, vec!["b", "c", "a"], "tallest first");
+        assert_eq!(extraction.best_video().map(|v| v.id.as_str()), Some("b"));
+    }
+
+    #[test]
+    fn host_matching_respects_label_boundaries() {
+        assert!(host_is("www.youtube.com", "youtube.com"));
+        assert!(host_is("youtube.com", "youtube.com"));
+        assert!(!host_is("notyoutube.com", "youtube.com"));
+        assert!(!host_is("youtube.com.evil.test", "youtube.com"));
+    }
+
+    #[test]
+    fn filenames_cannot_escape_the_download_directory() {
+        let name = safe_filename("../../etc/passwd", "mp4");
+        assert!(!name.contains('/'), "got {name}");
+        assert!(!name.starts_with('.'), "got {name}");
+        assert!(name.ends_with(".mp4"));
+    }
+
+    #[test]
+    fn an_empty_or_control_only_title_still_produces_a_usable_name() {
+        assert_eq!(safe_filename("", "mp4"), "video.mp4");
+        assert_eq!(safe_filename("   ", "m4a"), "video.m4a");
+        assert_eq!(safe_filename("\u{1}\u{2}", "mp4"), "video.mp4");
+    }
+
+    #[test]
+    fn a_long_title_is_bounded() {
+        let name = safe_filename(&"x".repeat(500), "mp4");
+        assert!(name.chars().count() <= 124, "{}", name.chars().count());
+    }
+
+    #[test]
+    fn an_unrelated_url_has_no_extractor_and_falls_through_to_the_sniffer() {
+        assert!(extractor_for("https://example.com/video.mp4").is_none());
+        assert!(!is_supported("https://example.com/video.mp4"));
+    }
+
+    #[cfg(feature = "platform-sites")]
+    #[test]
+    fn an_extractor_covering_two_sites_names_the_right_one_before_it_has_run() {
+        // `Meta` is one implementation for Instagram and Facebook, and the UI asks which
+        // site a URL belongs to before extraction starts. Naming it from the URL at
+        // construction is what stops a Facebook link being labelled "Instagram".
+        assert_eq!(
+            site_for("https://www.instagram.com/p/abc/"),
+            Some("Instagram")
+        );
+        assert_eq!(
+            site_for("https://www.facebook.com/watch/?v=1"),
+            Some("Facebook")
+        );
+        assert_eq!(site_for("https://fb.watch/abc/"), Some("Facebook"));
+    }
+
+    #[test]
+    fn the_platform_extractors_are_present_exactly_when_the_feature_is() {
+        // The store build must not merely decline to use this code — it must not contain
+        // it, which is the one thing a reviewer can check and a runtime setting cannot
+        // demonstrate.
+        assert_eq!(
+            is_supported("https://www.youtube.com/watch?v=aqz-KE-bpKQ"),
+            has_platform_sites()
+        );
+        assert_eq!(
+            is_supported("https://www.bilibili.com/video/BV1"),
+            has_platform_sites()
+        );
+        // The generic reader is in every build: reading a page's own `<video>` tag
+        // breaches no store policy.
+        assert!(is_supported(
+            "https://old.reddit.com/r/videos/comments/abc/"
+        ));
+        assert!(is_supported("https://streamable.com/abcdef"));
+    }
+}

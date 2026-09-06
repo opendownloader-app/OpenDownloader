@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "OpenDownloader — enregistrer une vidéo",
+    "description": "The extension name shown in the browser and the store."
+  },
+  "extDescription": {
+    "message": "Enregistrez vidéos, audio et fichiers d'une page web. Reprise, vérification, conversion. Libre, gratuit, sans envoi.",
+    "description": "The one-line store description, under 132 characters."
+  }
+}

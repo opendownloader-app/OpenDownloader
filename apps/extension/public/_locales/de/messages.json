@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "OpenDownloader — Web-Video sichern",
+    "description": "The extension name shown in the browser and the store."
+  },
+  "extDescription": {
+    "message": "Video, Audio und Dateien von Webseiten speichern. Fortsetzbar, geprüft, konvertierbar. Frei, quelloffen, kein Upload.",
+    "description": "The one-line store description, under 132 characters."
+  }
+}

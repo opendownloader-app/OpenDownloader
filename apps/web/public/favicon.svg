@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="OpenDownloader">
+  <!-- The family tile: same 24-grid, same 5.5 radius, same near-black ground as the
+       other OpenApps marks. Only the accent changes from product to product, and this
+       one's is the blue its own tokens already claim. -->
+  <rect width="24" height="24" rx="5.5" fill="#111111"/>
+  <!-- A play triangle turned to point down, over the line it lands on: the video, and
+       the disk it ends up on. Two shapes, because anything more dissolves at 16px. -->
+  <path d="M8.3 7.3 H15.7 L12 14.7 Z" fill="#15b9eb" stroke="#15b9eb" stroke-width="1.9" stroke-linejoin="round"/>
+  <rect x="6.4" y="17.9" width="11.2" height="1.9" rx="0.95" fill="#15b9eb"/>
+</svg>

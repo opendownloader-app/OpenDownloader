@@ -1,0 +1,215 @@
+{
+  "playabilityStatus": {
+    "status": "OK",
+    "playableInEmbed": true
+  },
+  "streamingData": {
+    "expiresInSeconds": "21540",
+    "adaptiveFormats": [
+      {
+        "itag": 299,
+        "url": "https://rr3---sn-x.googlevideo.com/videoplayback?expire=1788624290&itag=299&v=std&source=youtube",
+        "mimeType": "video/mp4; codecs=\"avc1.64002A\"",
+        "bitrate": 6933529,
+        "width": 1920,
+        "height": 1080,
+        "initRange": {
+          "start": "0",
+          "end": "741"
+        },
+        "indexRange": {
+          "start": "742",
+          "end": "2249"
+        },
+        "lastModified": "1719195290537273",
+        "contentLength": "257619653",
+        "quality": "hd1080",
+        "fps": 60,
+        "qualityLabel": "1080p60",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 3247821,
+        "approxDurationMs": "634566",
+        "qualityOrdinal": "QUALITY_ORDINAL_1080P"
+      },
+      {
+        "itag": 303,
+        "url": "https://rr3---sn-x.googlevideo.com/videoplayback?expire=1788624290&itag=303&v=std&source=youtube",
+        "mimeType": "video/webm; codecs=\"vp09.00.41.08\"",
+        "bitrate": 4652291,
+        "width": 1920,
+        "height": 1080,
+        "initRange": {
+          "start": "0",
+          "end": "218"
+        },
+        "indexRange": {
+          "start": "219",
+          "end": "2413"
+        },
+        "lastModified": "1719197912122364",
+        "contentLength": "168736189",
+        "quality": "hd1080",
+        "fps": 60,
+        "qualityLabel": "1080p60",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 2127264,
+        "colorInfo": {
+          "primaries": "COLOR_PRIMARIES_BT709",
+          "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+          "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+        },
+        "approxDurationMs": "634566",
+        "qualityOrdinal": "QUALITY_ORDINAL_1080P"
+      },
+      {
+        "itag": 399,
+        "url": "https://rr3---sn-x.googlevideo.com/videoplayback?expire=1788624290&itag=399&v=std&source=youtube",
+        "mimeType": "video/mp4; codecs=\"av01.0.09M.08\"",
+        "bitrate": 4492945,
+        "width": 1920,
+        "height": 1080,
+        "initRange": {
+          "start": "0",
+          "end": "699"
+        },
+        "indexRange": {
+          "start": "700",
+          "end": "2207"
+        },
+        "lastModified": "1719202580711560",
+        "contentLength": "124386876",
+        "quality": "hd1080",
+        "fps": 60,
+        "qualityLabel": "1080p60",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 1568150,
+        "colorInfo": {
+          "primaries": "COLOR_PRIMARIES_BT709",
+          "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+          "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+        },
+        "approxDurationMs": "634566",
+        "qualityOrdinal": "QUALITY_ORDINAL_1080P"
+      },
+      {
+        "itag": 134,
+        "url": "https://rr3---sn-x.googlevideo.com/videoplayback?expire=1788624290&itag=134&v=std&source=youtube",
+        "mimeType": "video/mp4; codecs=\"avc1.4D401E\"",
+        "bitrate": 643723,
+        "width": 640,
+        "height": 360,
+        "initRange": {
+          "start": "0",
+          "end": "740"
+        },
+        "indexRange": {
+          "start": "741",
+          "end": "2248"
+        },
+        "lastModified": "1719192888467139",
+        "contentLength": "18294110",
+        "quality": "medium",
+        "fps": 30,
+        "qualityLabel": "360p",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 230634,
+        "highReplication": true,
+        "approxDurationMs": "634566",
+        "qualityOrdinal": "QUALITY_ORDINAL_360P"
+      },
+      {
+        "itag": 140,
+        "url": "https://rr3---sn-x.googlevideo.com/videoplayback?expire=1788624290&itag=140&v=std&source=youtube",
+        "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+        "bitrate": 130992,
+        "initRange": {
+          "start": "0",
+          "end": "722"
+        },
+        "indexRange": {
+          "start": "723",
+          "end": "1522"
+        },
+        "lastModified": "1719185020722767",
+        "contentLength": "10271496",
+        "quality": "tiny",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 129481,
+        "highReplication": true,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "approxDurationMs": "634624",
+        "audioSampleRate": "44100",
+        "audioChannels": 2,
+        "loudnessDb": -4.709999,
+        "trackAbsoluteLoudnessLkfs": -18.71,
+        "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+      },
+      {
+        "itag": 140,
+        "url": "https://rr3---sn-x.googlevideo.com/videoplayback?expire=1788624290&itag=140&v=drc&source=youtube",
+        "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+        "bitrate": 131003,
+        "initRange": {
+          "start": "0",
+          "end": "722"
+        },
+        "indexRange": {
+          "start": "723",
+          "end": "1522"
+        },
+        "lastModified": "1719192083140994",
+        "contentLength": "10271496",
+        "quality": "tiny",
+        "xtags": "CggKA2RyYxIBMQ",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 129481,
+        "highReplication": true,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "approxDurationMs": "634624",
+        "audioSampleRate": "44100",
+        "audioChannels": 2,
+        "loudnessDb": -5.1000004,
+        "isDrc": true,
+        "trackAbsoluteLoudnessLkfs": -19.1,
+        "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+      },
+      {
+        "itag": 251,
+        "url": "https://rr3---sn-x.googlevideo.com/videoplayback?expire=1788624290&itag=251&v=std&source=youtube",
+        "mimeType": "audio/webm; codecs=\"opus\"",
+        "bitrate": 143452,
+        "initRange": {
+          "start": "0",
+          "end": "258"
+        },
+        "indexRange": {
+          "start": "259",
+          "end": "1343"
+        },
+        "lastModified": "1719185012384481",
+        "contentLength": "10202210",
+        "quality": "tiny",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 128612,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "approxDurationMs": "634601",
+        "audioSampleRate": "48000",
+        "audioChannels": 2,
+        "loudnessDb": -4.709999,
+        "trackAbsoluteLoudnessLkfs": -18.71,
+        "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+      }
+    ],
+    "serverAbrStreamingUrl": "https://rr3---sn-x.googlevideo.com/videoplayback?sabr=1"
+  },
+  "videoDetails": {
+    "videoId": "aqz-KE-bpKQ",
+    "title": "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film",
+    "lengthSeconds": "635",
+    "channelId": "UCSMOQeBJ2RAnuFungnQOxLg",
+    "isCrawlable": true,
+    "author": "Blender",
+    "isPrivate": false,
+    "isLiveContent": false
+  }
+}

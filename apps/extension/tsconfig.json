@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "types": [
+      "chrome",
+      "node"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@opendownloader/engine": [
+        "../../packages/engine/src/index.ts"
+      ],
+      "@opendownloader/engine/convert": [
+        "../../packages/engine/src/convert.ts"
+      ],
+      "@opendownloader/ui": [
+        "../../packages/ui/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.mjs"
+  ]
+}

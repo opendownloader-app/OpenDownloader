@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+      OpenDownloader — save a video from a link, free, in your browser
+    </title>
+    <meta
+      name="description"
+      content="Paste a link and save the video or audio to your computer. Resumable, verified with SHA-256, and it all runs in your browser. Free and open source, no account, no ads."
+    />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="./icon-32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="./icon-180.png" />
+    <link rel="stylesheet" href="../../packages/ui/src/base.css" />
+    <style>
+      /* A class, not `body`, because the bundler decides stylesheet order and does not
+         promise this block comes after base.css. `body { margin: 0 }` there is a reset
+         and would otherwise win, pinning the whole page to the left edge on a wide
+         screen. A class outranks an element selector whichever order they land in. */
+      body.page {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: var(--space-10) var(--space-5) var(--space-20);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        margin-bottom: var(--space-4);
+      }
+      .brand img {
+        width: 34px;
+        height: 34px;
+        flex: none;
+        border-radius: 8px;
+      }
+      .brand span {
+        font: var(--weight-medium) var(--text-base) / 1 var(--font-display);
+        letter-spacing: var(--tracking-heading);
+        color: var(--text-strong);
+      }
+      header h1 {
+        font: var(--weight-medium) var(--text-2xl) / var(--leading-snug)
+          var(--font-display);
+        letter-spacing: var(--tracking-display);
+        color: var(--text-strong);
+        margin: 0 0 var(--space-3);
+        text-wrap: balance;
+        max-width: 22ch;
+      }
+      header p.lead {
+        font-size: var(--text-md);
+        line-height: var(--leading-relaxed);
+        color: var(--text-muted);
+        margin: 0 0 var(--space-2);
+        max-width: 62ch;
+      }
+      section {
+        margin-top: var(--space-12);
+      }
+      section > h2 {
+        font: var(--weight-medium) var(--text-lg) / var(--leading-snug)
+          var(--font-display);
+        letter-spacing: var(--tracking-heading);
+        color: var(--text-strong);
+        margin: 0 0 var(--space-4);
+      }
+      /* The link box is the one thing on the page that has to be obvious, so it is the
+         one thing set above the product type scale. */
+      #url {
+        font-size: var(--text-md);
+        min-height: 44px;
+        padding: 0 var(--space-4);
+      }
+      #go {
+        font-size: var(--text-base);
+        min-height: 44px;
+        padding: 0 var(--space-6);
+      }
+      /* Four items, so four columns where they fit and two where they do not — an
+         auto-fit that lands on three leaves the fourth card alone in its own row. */
+      .tasks {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--space-3);
+      }
+      @media (max-width: 860px) {
+        .tasks {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 460px) {
+        .tasks {
+          grid-template-columns: 1fr;
+        }
+      }
+      .tasks .card h3 {
+        font: var(--weight-medium) var(--text-base) / var(--leading-snug)
+          var(--font-display);
+        color: var(--text-strong);
+        margin: 0 0 var(--space-1);
+      }
+      .tasks .card p {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: var(--text-sm);
+      }
+      footer {
+        margin-top: var(--space-16);
+        border-top: var(--border-width) solid var(--border-hairline);
+        padding-top: var(--space-5);
+        color: var(--text-muted);
+        font-size: var(--text-sm);
+        max-width: 68ch;
+      }
+      a {
+        color: var(--accent-text);
+        text-underline-offset: 2px;
+      }
+      a:hover {
+        color: var(--text-link-hover);
+      }
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.9em;
+        background: var(--bg-sunken);
+        border-radius: var(--radius-xs);
+        padding: 1px 5px;
+      }
+      #manager > * + * {
+        margin-top: var(--space-3);
+      }
+      #tools > * + * {
+        margin-top: var(--space-2);
+      }
+    </style>
+  </head>
+  <body class="page">
+    <header>
+      <div class="brand">
+        <img src="./favicon.svg" alt="" />
+        <span>OpenDownloader</span>
+      </div>
+      <h1>Save a video from a web page to your computer</h1>
+      <p class="lead">
+        Paste the link to a video, audio file or stream and it is saved to your
+        computer. Interrupted downloads pick up where they stopped, and every
+        finished file is checked with a SHA-256 digest read back off disk.
+      </p>
+      <p class="lead">
+        Every feature is free, there is no account, and nothing is uploaded: the
+        download runs in this tab, on your machine.
+      </p>
+    </header>
+
+    <section>
+      <div class="row" style="gap: 10px">
+        <input
+          id="url"
+          class="grow"
+          type="url"
+          spellcheck="false"
+          placeholder="https://example.com/lecture.mp4 or …/stream.m3u8"
+          aria-label="Link to download"
+        />
+        <button id="go" class="primary">Download</button>
+      </div>
+      <p id="url-status" class="muted" style="margin: 8px 0 0"></p>
+      <div
+        id="site-options"
+        class="stack"
+        style="margin-top: 10px"
+        hidden
+      ></div>
+      <p class="muted" style="margin: 6px 0 0">
+        A direct link to a file or an <code>.m3u8</code> playlist, or a video
+        page on a supported platform. Services whose media is DRM-protected are
+        refused, in code, and so is any encrypted stream anywhere.
+      </p>
+    </section>
+
+    <section>
+      <h2>What people use this for</h2>
+      <div class="tasks">
+        <div class="card">
+          <h3>Saving a recorded class</h3>
+          <p>
+            Keep a lecture or training video for offline study, with the
+            download resuming if the connection drops.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Keeping a meeting recording</h3>
+          <p>
+            Save a call recording to your own disk before the link expires, and
+            confirm the copy is intact.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Turning a video into audio</h3>
+          <p>
+            Pull the soundtrack out of a video as an M4A or MP3 to listen to on
+            the way somewhere.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Rescuing a broken stream</h3>
+          <p>
+            Join loose <code>.ts</code> segments back into one playable MP4 when
+            a download stopped part way.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Downloads</h2>
+      <div id="manager"></div>
+    </section>
+
+    <section id="tools"></section>
+
+    <section>
+      <h2>The browser extension does more</h2>
+      <p class="muted" style="max-width: 62ch">
+        This page can only download links you paste, because a web page is not
+        allowed to see what another site loads. The extension watches the page
+        you are on and offers what it finds, one site at a time and only where
+        you turn it on. It is the same engine and it is equally free.
+      </p>
+      <p class="row wrap">
+        <a
+          id="chrome-link"
+          href="https://chromewebstore.google.com/"
+          rel="noopener"
+          >Chrome</a
+        >
+        <a
+          id="edge-link"
+          href="https://microsoftedge.microsoft.com/addons"
+          rel="noopener"
+          >Edge</a
+        >
+        <a id="firefox-link" href="https://addons.mozilla.org/" rel="noopener"
+          >Firefox</a
+        >
+      </p>
+    </section>
+
+    <footer>
+      <p>
+        OpenDownloader is open source under MIT or Apache-2.0.
+        <a href="https://github.com/opentoolkitsg/opendownloader" rel="noopener"
+          >Read the code</a
+        >. Nothing here is metered, and there is no paid tier to upgrade to.
+      </p>
+      <p>
+        Some servers refuse to be read by a web page. If a download fails for
+        that reason, you can run the relay from the repository on your own
+        machine and point this page at it in Settings — or use the extension,
+        which never has that problem.
+      </p>
+    </footer>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

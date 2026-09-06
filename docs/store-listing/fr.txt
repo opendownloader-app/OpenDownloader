@@ -1,0 +1,51 @@
+===== SEARCH TERMS (Edge Partner Center · 7) =====
+
+comment enregistrer une vidéo d'un site web
+télécharger une vidéo d'une page web
+téléchargeur de vidéo
+enregistrer une vidéo de cours
+téléchargeur m3u8
+reprendre un téléchargement interrompu
+extraire l'audio d'une vidéo
+
+
+===== OVERVIEW (Description) =====
+
+Enregistrez une vidéo, un fichier audio ou un téléchargement d'une page web sur votre ordinateur. Tout est gratuit, rien n'est envoyé en ligne, et il n'y a rien d'autre à installer.
+
+Ouvrez l'extension sur une page en train de lire quelque chose et elle affiche ce qu'elle a trouvé. Choisissez un élément, ou cochez-en plusieurs et prenez-les d'un coup. Les téléchargements se poursuivent dans un onglet dédié : interrompez-en un, fermez l'onglet, redémarrez le navigateur — il repart de là où il s'était arrêté au lieu de tout recommencer.
+
+CE QU'ELLE FAIT
+
+• Repère les vidéos, les fichiers audio, les images et les fichiers qu'une page charge, sur les sites que vous avez autorisés
+• Reprend un téléchargement interrompu au lieu de le relancer depuis le début
+• Télécharge en parallèle sur plusieurs connexions, pour qu'un gros fichier arrive plus vite
+• Met en file d'attente autant de téléchargements que vous voulez et les enchaîne pendant que vous faites autre chose
+• Vérifie chaque fichier terminé avec une empreinte SHA-256 relue depuis le disque, pour que vous sachiez que la copie est intacte
+• Assemble un flux en un seul MP4 lisible, en réunissant ses segments sans rien réencoder
+• N'enregistre que l'audio, en M4A ou en MP3
+• Extrait les sous-titres d'un flux en SRT ou WebVTT, et peut les traduire avec le traducteur intégré de votre navigateur
+• Convertit vidéo et audio entre MP4, WebM, M4A, MP3, WAV et OGG
+• Répare un téléchargement bloqué en rassemblant les fragments .ts restants en un seul fichier
+
+GRATUIT VEUT DIRE GRATUIT
+
+Toutes les fonctions ci-dessus sont gratuites et le resteront. Pas de compte, pas de connexion, pas de période d'essai, pas de crédits, pas de limite quotidienne, et aucune version payante qui retiendrait quoi que ce soit. Il n'y a rien vers quoi passer.
+
+Rien de ce que vous téléchargez n'est envoyé où que ce soit. Aucune statistique, aucun pistage, aucune publicité. L'extension demande l'accès site par site, et tant que vous ne l'avez pas activée pour un site, elle ne voit rien de ce qui s'y passe.
+
+Il n'y a pas non plus de programme compagnon. Certains téléchargeurs exigent d'installer une application auxiliaire séparée avant que leurs fonctions principales marchent ; celui-ci fait tout dans le navigateur : pas d'installateur, pas de service en arrière-plan, et rien qui traîne si vous le supprimez.
+
+CE QU'ELLE REFUSE DÉLIBÉRÉMENT DE FAIRE
+
+Elle ne télécharge que des médias web ouverts. Les sites dont les conditions d'utilisation ou la protection contre la copie interdisent le téléchargement sont refusés, et ce refus est inscrit dans le code plutôt que sur une page de politique — aucun réglage ne le désactive. Les flux chiffrés sont refusés d'emblée : aucune clé n'est jamais récupérée et rien n'est jamais déchiffré. Les flux en direct sont refusés, car ils n'ont pas de fin jusqu'à laquelle télécharger.
+
+Si ce n'est pas l'outil que vous cherchez, ce n'est pas l'outil que vous cherchez, et mieux vaut le savoir tout de suite.
+
+OPEN SOURCE
+
+L'ensemble est open source sous licence MIT ou Apache-2.0, et le moteur qui décide quoi récupérer et comment le reconstruire est écrit en Rust. Vous pouvez lire exactement ce qu'il fait, y compris les refus ci-dessus :
+
+https://github.com/opentoolkitsg/opendownloader
+
+Il existe aussi un site web qui fait le même travail à partir d'un lien collé, pour les cas où vous ne pouvez pas installer d'extension.

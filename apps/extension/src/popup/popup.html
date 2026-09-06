@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenDownloader</title>
+    <link rel="stylesheet" href="../../../../packages/ui/src/base.css" />
+    <style>
+      /* A class, not `body`, because the bundler puts base.css after this block and
+         its `body` reset would win. Same reason as the web app and the manager. */
+      body.popup {
+        width: 400px;
+        padding: var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+
+      /* The mark comes from the built icon rather than a second copy of the SVG, so
+         packages/ui/src/logo.svg stays the only place the logo is drawn. */
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-bottom: var(--space-1);
+      }
+      .brand img {
+        width: 22px;
+        height: 22px;
+        flex: none;
+        border-radius: 5px;
+      }
+      /* The popup opens under the toolbar icon and is read in a glance, so the name
+         sits one step above body text and the explanation one step below it. */
+      header h1 {
+        font: var(--weight-medium) var(--text-lg) / var(--leading-snug)
+          var(--font-display);
+        letter-spacing: var(--tracking-heading);
+        margin: 0;
+      }
+      header p {
+        margin: 0;
+        font-size: var(--text-sm);
+        line-height: var(--leading-relaxed);
+        color: var(--text-muted);
+      }
+
+      /* A popup cannot grow past ~600px before the browser scrolls the whole thing,
+         so the list scrolls inside itself and the footer stays reachable. */
+      #list {
+        max-height: 330px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      #list:not(:empty) {
+        /* Hairlines at both ends read as "this strip scrolls" without a scrollbar. */
+        border-block: var(--border-width) solid var(--border-hairline);
+        padding-block: var(--space-3);
+      }
+
+      footer {
+        border-top: var(--border-width) solid var(--border-hairline);
+        padding-top: var(--space-3);
+      }
+
+      /* The site panel is the good path — this page is understood, here is its real
+         list of qualities — so it is the one surface carrying the accent. */
+      #site-panel {
+        border-color: color-mix(
+          in oklab,
+          var(--accent) 35%,
+          var(--border-hairline)
+        );
+        background:
+          linear-gradient(var(--accent-soft), var(--accent-soft)),
+          var(--surface-card);
+      }
+      #site-panel .headline {
+        font-size: var(--text-sm);
+        line-height: var(--leading-relaxed);
+      }
+      #site-panel .headline strong {
+        color: var(--text-strong);
+      }
+      #site-options:empty {
+        display: none;
+      }
+      /* The empty state carries a second, quieter sentence: the common reason for
+         finding nothing is not that detection failed but that the page genuinely has
+         no media, and saying so stops the reload-and-try-again loop. */
+      #empty span {
+        display: block;
+        margin-top: var(--space-2);
+        font-size: var(--text-sm);
+        line-height: var(--leading-relaxed);
+      }
+    </style>
+  </head>
+  <body class="popup">
+    <header>
+      <div class="brand">
+        <img src="icons/icon48.png" alt="" />
+        <h1>OpenDownloader</h1>
+      </div>
+      <p>
+        Every feature is free. Nothing is uploaded, and detection stays off
+        until you turn it on, one site at a time.
+      </p>
+    </header>
+
+    <div id="site-panel" class="card stack" hidden>
+      <div class="headline">
+        <strong><span id="site-name"></span></strong> is supported directly —
+        read this page for its own list of qualities.
+      </div>
+      <button id="site-extract" class="primary">
+        See what this page offers
+      </button>
+      <div id="site-status" class="muted"></div>
+      <div id="site-options" class="stack"></div>
+    </div>
+
+    <div id="permission" class="card stack" hidden>
+      <div>
+        Detection is <strong>off</strong> for
+        <span id="site" class="mono"></span>.
+      </div>
+      <button id="grant" class="primary">Enable detection on this site</button>
+    </div>
+
+    <div id="empty" class="card muted" hidden>
+      No media detected yet. Play or reload the page and check back.
+      <span class="muted"
+        >Some pages have no media of their own — an index that hands out magnet,
+        torrent or Xunlei links makes the browser fetch nothing, so there is
+        nothing here to find.</span
+      >
+    </div>
+
+    <div id="batch" class="toolbar" hidden>
+      <label><input type="checkbox" id="select-all" /> Select all</label>
+      <label><input type="checkbox" id="audio-only" /> Audio only</label>
+      <span class="grow"></span>
+      <button id="download-selected" class="primary">Download all</button>
+    </div>
+
+    <div id="list" class="stack"></div>
+
+    <footer class="row">
+      <button id="open" class="grow">Open downloads</button>
+      <button id="clear">Clear</button>
+    </footer>
+
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>

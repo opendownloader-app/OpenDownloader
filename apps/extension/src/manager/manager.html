@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenDownloader</title>
+    <link rel="stylesheet" href="../../../../packages/ui/src/base.css" />
+    <style>
+      /* See the note in the web app's index.html: a class, because the bundler puts
+         base.css after this block and `body { margin: 0 }` there would win. */
+      body.page {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: var(--space-10) var(--space-5) var(--space-16);
+      }
+      /* The same heading treatment as the web app, so the extension's own tab and the
+         site do not read as two different products. */
+      /* Same mark as the popup, from the same built icon. */
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        margin-bottom: var(--space-2);
+      }
+      .brand img {
+        width: 30px;
+        height: 30px;
+        flex: none;
+        border-radius: 7px;
+      }
+      header h1 {
+        font: var(--weight-medium) var(--text-2xl) / var(--leading-snug)
+          var(--font-display);
+        letter-spacing: var(--tracking-display);
+        margin: 0;
+        text-wrap: balance;
+      }
+      header p.lead {
+        margin: 0;
+        font-size: var(--text-md);
+        line-height: var(--leading-relaxed);
+        color: var(--text-muted);
+        max-width: 62ch;
+      }
+      #manager {
+        margin-top: var(--space-8);
+      }
+      #manager > * + * {
+        margin-top: var(--space-3);
+      }
+      #tools {
+        margin-top: var(--space-8);
+        border-top: var(--border-width) solid var(--border-hairline);
+        padding-top: var(--space-5);
+      }
+      #tools > * + * {
+        margin-top: var(--space-2);
+      }
+    </style>
+  </head>
+  <body class="page">
+    <header>
+      <div class="brand">
+        <img src="icons/icon128.png" alt="" />
+        <h1>Downloads</h1>
+      </div>
+      <p class="lead">
+        Everything queued from the extension lands here. Interrupted downloads
+        pick up where they stopped, and each finished file is checked with a
+        SHA-256 digest read back off disk.
+      </p>
+    </header>
+
+    <div id="manager"></div>
+    <div id="tools"></div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

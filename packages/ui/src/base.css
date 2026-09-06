@@ -1,0 +1,470 @@
+/* The look of every opendownloader surface: the popup, the manager tab, and the
+   standalone web app.
+
+   Built on the OpenApps design system rather than on its own palette — the tokens,
+   the Geist faces, the spacing and radius scales all come from `./tokens/`, which is
+   vendored from `openapps/tokens`. Product code reads only the semantic layer
+   (`--text-body`, `--surface-card`, `--border-hairline`), never a raw hex.
+
+   Two constraints shape what follows and are worth stating once:
+
+   - **Nothing may reference a remote origin.** Manifest V3 blocks remote stylesheets
+     and fonts outright, so the faces are self-hosted and every colour is inline. A
+     `fonts.googleapis.com` link would look right in the web app and silently fall back
+     to the system face in the extension.
+   - **The popup is 380px wide.** Anything that only works at desktop width is a bug
+     there, so the components below are sized for the narrow case and simply have more
+     room in the manager. */
+
+@import url("./tokens/css/colors.css");
+@import url("./tokens/css/typography.css");
+@import url("./tokens/css/spacing.css");
+@import url("./tokens/css/radius.css");
+@import url("./tokens/css/elevation.css");
+@import url("./tokens/css/motion.css");
+@import url("./tokens/css/fonts.css");
+
+/* The system publishes its dark scope as `.oa-dark` on a container and `.oa-auto` on
+   <html>. Neither host here has a theme switch, so both surfaces follow the OS — which
+   means adopting the dark block for `prefers-color-scheme` without asking anyone to
+   remember a class. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-page: var(--color-background-alt);
+    --bg-subtle: var(--gray-950);
+    --bg-sunken: var(--black);
+    --surface-card: var(--gray-950);
+    --surface-raised: var(--gray-900);
+    --surface-inverse: var(--white);
+    --surface-hover: var(--white-04);
+    --surface-active: var(--white-10);
+    --surface-selected: color-mix(in oklab, var(--green) 20%, transparent);
+
+    --text-strong: var(--white);
+    --text-body: var(--gray-200);
+    --text-muted: var(--gray-400);
+    --text-faint: var(--gray-500);
+    --text-inverse: var(--color-font);
+    --text-brand: var(--green);
+    --text-link: var(--white);
+    --text-link-hover: var(--green);
+
+    --border-hairline: var(--white-10);
+    --border-strong: var(--white-20);
+    --border-inverse: var(--black-10);
+    --border-focus: var(--white);
+
+    --success-fg: var(--green);
+    --success-bg: color-mix(in oklab, var(--green) 16%, transparent);
+    --warning-fg: var(--orange);
+    --warning-bg: color-mix(in oklab, var(--orange) 16%, transparent);
+    --danger-fg: var(--red);
+    --danger-bg: color-mix(in oklab, var(--red) 16%, transparent);
+    --info-fg: var(--blue);
+    --info-bg: color-mix(in oklab, var(--blue) 16%, transparent);
+
+    --focus-ring: 0 0 0 2px var(--bg-page), 0 0 0 4px var(--white);
+
+    --logo-fg: var(--white);
+    --logo-tile-bg: var(--white);
+    --logo-tile-fg: var(--color-font);
+    color-scheme: dark;
+  }
+}
+
+/* This product's own accent.
+   The system's `--brand` is green, which every app in the family shares. A downloader
+   wants the family's blue: it is what the icon is, and it keeps green free to mean
+   "finished" rather than "us". */
+:root {
+  --accent: var(--blue);
+  --accent-text: var(--blue-700, #0b7ea3);
+  --accent-soft: color-mix(in oklab, var(--blue) 12%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent-text: color-mix(in oklab, var(--blue) 80%, var(--white));
+    --accent-soft: color-mix(in oklab, var(--blue) 18%, transparent);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* The layout primitives below set `display: flex`, and an author rule beats the UA
+   sheet's `[hidden] { display: none }` no matter how weak its selector. Without this,
+   every panel that is both a flex container and toggled with `.hidden` stays on
+   screen: the popup showed its site and permission panels together, and the manager
+   drew an empty sunken toolbar with no jobs in it. `!important` is the right tool
+   here — `hidden` is an assertion that the element is not rendered, and nothing in a
+   stylesheet should be able to argue with it. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-body);
+  color: var(--text-body);
+  background: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1 {
+  font: var(--weight-medium) var(--text-md) / var(--leading-snug)
+    var(--font-display);
+  letter-spacing: var(--tracking-heading);
+  color: var(--text-strong);
+  margin: 0;
+}
+
+h2 {
+  font: var(--weight-medium) var(--text-base) / var(--leading-snug)
+    var(--font-display);
+  letter-spacing: var(--tracking-heading);
+  color: var(--text-strong);
+  margin: 0;
+}
+
+/* ---------- text roles ---------- */
+
+.muted {
+  color: var(--text-muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- surfaces ----------
+   Border, fill and radius are spent by role rather than stamped on everything: a card
+   is the unit of content, the toolbar is a recessed strip, and a panel is a card that
+   opens. Nesting a card inside a card is what makes a list look like scaffolding. */
+
+.card {
+  background: var(--surface-card);
+  border: var(--border-width) solid var(--border-hairline);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-lg);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* ---------- controls ---------- */
+
+button {
+  font: var(--weight-medium) var(--text-sm) / 1 var(--font-sans);
+  letter-spacing: var(--tracking-body);
+  padding: var(--space-2) var(--space-3);
+  min-height: 30px;
+  border-radius: var(--radius-md);
+  border: var(--border-width) solid var(--border-hairline);
+  background: var(--surface-card);
+  color: var(--text-body);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast, 120ms) var(--ease-standard, ease),
+    border-color var(--duration-fast, 120ms) var(--ease-standard, ease);
+}
+
+button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+button:active:not(:disabled) {
+  background: var(--surface-active);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  /* The accent is a light blue; near-black on it clears contrast in both themes, where
+     white does not. */
+  color: var(--black);
+}
+
+button.primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 88%, var(--black));
+  border-color: color-mix(in oklab, var(--accent) 88%, var(--black));
+}
+
+button.danger {
+  color: var(--danger-fg);
+}
+
+button.danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: var(--danger-fg);
+}
+
+button.link {
+  border: none;
+  background: none;
+  color: var(--accent-text);
+  padding: var(--space-1) var(--space-2);
+  min-height: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+input[type="text"],
+input[type="url"],
+input[type="number"],
+select {
+  font: var(--weight-regular) var(--text-sm) / 1.3 var(--font-sans);
+  color: var(--text-strong);
+  background: var(--surface-card);
+  border: var(--border-width) solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  min-height: 30px;
+  min-width: 0;
+}
+
+input::placeholder {
+  color: var(--text-faint);
+}
+
+input[type="text"]:hover,
+input[type="url"]:hover,
+select:hover {
+  border-color: var(--border-strong);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
+label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-body);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- layout primitives ---------- */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.row.wrap {
+  flex-wrap: wrap;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sep {
+  width: var(--border-width);
+  align-self: stretch;
+  background: var(--border-hairline);
+}
+
+/* ---------- progress ----------
+   A hairline track rather than the platform widget: the native bar is a different
+   height, colour and radius on every OS, which is exactly the sort of detail that makes
+   a careful layout look assembled from parts. */
+
+progress {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+progress::-webkit-progress-bar {
+  background: var(--bg-sunken);
+  border-radius: var(--radius-full);
+}
+
+progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: var(--radius-full);
+  transition: width var(--duration-normal, 200ms) var(--ease-standard, ease);
+}
+
+progress::-moz-progress-bar {
+  background: var(--accent);
+  border-radius: var(--radius-full);
+}
+
+/* ---------- state ---------- */
+
+.status-done {
+  color: var(--success-fg);
+}
+
+.status-error {
+  color: var(--danger-fg);
+}
+
+.status-warn {
+  color: var(--warning-fg);
+}
+
+/* ---------- badges ----------
+   State is carried in form as well as colour, so a badge still reads when the colour
+   does not: verified is filled, a plain label is outlined. */
+
+.badge {
+  font: var(--weight-medium) var(--text-2xs) / 1 var(--font-sans);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-full);
+  border: var(--border-width) solid var(--border-hairline);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.badge.ok {
+  color: var(--success-fg);
+  background: var(--success-bg);
+  border-color: transparent;
+}
+
+.badge.bad {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+  border-color: transparent;
+}
+
+.badge.accent {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+
+/* ---------- disclosure panels ---------- */
+
+details.panel > summary {
+  cursor: pointer;
+  font-weight: var(--weight-medium);
+  color: var(--text-strong);
+  padding: var(--space-1) 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+details.panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A caret drawn rather than borrowed, so it rotates and matches the type colour. */
+details.panel > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  opacity: 0.5;
+  transition: transform var(--duration-fast, 120ms) var(--ease-standard, ease);
+}
+
+details.panel[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+details.panel[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
+/* ---------- notes ---------- */
+
+.hint {
+  border-left: 2px solid var(--accent);
+  padding-left: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.hint.warn {
+  border-left-color: var(--warning-fg);
+  color: var(--warning-fg);
+}
+
+.hint.bad {
+  border-left-color: var(--danger-fg);
+  color: var(--danger-fg);
+}
+
+/* ---------- labelled field ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.field > span {
+  font: var(--weight-medium) var(--text-2xs) / 1 var(--font-sans);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

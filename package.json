@@ -1,0 +1,24 @@
+{
+  "name": "opendownloader",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:wasm": "npm run build:wasm -w @opendownloader/engine",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build:extension": "npm run build -w @opendownloader/extension",
+    "build:extension:firefox": "npm run build:firefox -w @opendownloader/extension",
+    "build:web": "npm run build -w @opendownloader/web",
+    "build": "npm run build:extension && npm run build:extension:firefox && npm run build:web",
+    "e2e": "npm run e2e -w @opendownloader/extension",
+    "smoke": "npm run smoke -w @opendownloader/web",
+    "test": "cargo test --workspace",
+    "build:extension:store": "OPENDOWNLOADER_STORE_BUILD=1 npm run build -w @opendownloader/extension && OPENDOWNLOADER_STORE_BUILD=1 npm run build:firefox -w @opendownloader/extension",
+    "verify:sites": "node scripts/verify-sites.mjs",
+    "verify:sites:full": "node scripts/verify-sites.mjs --full",
+    "start": "bash scripts/run-local.sh"
+  }
+}

@@ -1,0 +1,51 @@
+===== SEARCH TERMS (Edge Partner Center · 7) =====
+
+cómo guardar un video de una página web
+descargar video de una página web
+descargador de videos
+guardar video de clase
+descargar m3u8
+reanudar descarga interrumpida
+extraer audio de un video
+
+
+===== OVERVIEW (Description) =====
+
+Guarda un video, un archivo de audio o una descarga de una página web en tu computadora. Todo es gratis, no se sube nada y no hay nada más que instalar.
+
+Abre la extensión en una página que esté reproduciendo algo y te muestra lo que encontró. Elige uno, o marca varios y bájalos todos de una vez. Las descargas siguen en una pestaña propia: si interrumpes una, cierras la pestaña o reinicias el navegador, continúa desde donde se quedó en lugar de empezar de nuevo.
+
+QUÉ HACE
+
+• Encuentra el video, el audio, las imágenes y los archivos que carga una página, en los sitios donde tú la actives
+• Reanuda una descarga interrumpida en vez de volver a empezarla
+• Descarga en paralelo por varias conexiones, así un archivo grande termina antes
+• Pone en cola todas las descargas que quieras y las va completando mientras haces otra cosa
+• Verifica cada archivo terminado con un resumen SHA-256 leído de vuelta desde el disco, para que sepas que la copia está intacta
+• Convierte un stream en un solo MP4 reproducible, uniendo sus fragmentos sin recodificar nada
+• Guarda solo el audio como M4A o MP3
+• Extrae los subtítulos de un stream en SRT o WebVTT, y puede traducirlos con el traductor propio de tu navegador
+• Convierte video y audio entre MP4, WebM, M4A, MP3, WAV y OGG
+• Repara una descarga detenida uniendo de nuevo los fragmentos .ts que quedaron
+
+GRATIS SIGNIFICA GRATIS
+
+Todas las funciones de arriba son gratuitas y siempre lo serán. No hay cuenta, ni inicio de sesión, ni prueba, ni créditos, ni límite diario, ni versión de pago que retenga nada. No hay nada a lo que actualizarse.
+
+Nada de lo que descargas se envía a ningún lado. No hay analítica, ni rastreo, ni publicidad. La extensión pide acceso sitio por sitio, y hasta que no la actives para un sitio no ve nada de lo que ocurre ahí.
+
+Tampoco hay un programa complementario. Algunos descargadores te piden instalar una aplicación auxiliar aparte antes de que sus funciones principales sirvan; esta hace todo dentro del navegador: no hay instalador, no hay servicio en segundo plano y no queda nada si la desinstalas.
+
+LO QUE NO HACE A PROPÓSITO
+
+Solo descarga medios web abiertos. Los sitios cuyos términos de servicio o protección anticopia prohíben la descarga son rechazados, y ese rechazo está escrito en el código y no en una página de políticas: no hay ninguna opción que lo desactive. Los streams cifrados se rechazan de plano: nunca se obtiene una clave ni se descifra nada. Las transmisiones en vivo se rechazan porque no tienen un final hasta el cual descargar.
+
+Si esa no es la herramienta que buscas, esta no es la herramienta que buscas, y es mejor saberlo desde ahora.
+
+CÓDIGO ABIERTO
+
+Todo el proyecto es de código abierto bajo MIT o Apache-2.0, y el motor que decide qué obtener y cómo volver a armarlo está escrito en Rust. Puedes leer exactamente lo que hace, incluidos los rechazos de arriba:
+
+https://github.com/opentoolkitsg/opendownloader
+
+También hay un sitio web que hace el mismo trabajo con un enlace que pegues, para cuando no puedas instalar una extensión.

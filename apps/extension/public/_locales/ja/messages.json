@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "OpenDownloader — ウェブ動画を保存",
+    "description": "The extension name shown in the browser and the store."
+  },
+  "extDescription": {
+    "message": "ウェブページの動画・音声・ファイルを保存。再開、検証、変換に対応。完全無料のオープンソース、アップロードなし。",
+    "description": "The one-line store description, under 132 characters."
+  }
+}

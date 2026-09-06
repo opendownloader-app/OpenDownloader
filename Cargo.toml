@@ -1,0 +1,66 @@
+[workspace]
+members = [
+    "crates/dl-core",
+    "crates/dl-container",
+    "crates/dl-relay",
+    "crates/dl-torrent",
+    "crates/dl-testserver",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/opentoolkitsg/opendownloader"
+
+[workspace.dependencies]
+dl-container = { path = "crates/dl-container" }
+dl-core = { path = "crates/dl-core" }
+sha2 = { version = "0.10", default-features = false }
+# The eD2k hash is MD4-based. Same RustCrypto family as sha2, same no-std posture,
+# so it costs the wasm bundle very little.
+md4 = { version = "0.10", default-features = false }
+m3u8-rs = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wasm-bindgen = "=0.2.126"
+
+# dl-torrent only. A BitTorrent engine needs real sockets — TCP, uTP and a DHT — which
+# is precisely what a browser tab has none of, and why this lives in a local process
+# rather than in the wasm core.
+tokio-util = { version = "0.7", features = ["io"] }
+anyhow = "1"
+librqbit = { version = "9", default-features = false, features = [
+    "default-tls",
+] }
+
+# dl-relay only. The relay is the one crate in this workspace that does I/O, so it is
+# the only place a runtime, an HTTP framework and a TLS stack appear.
+axum = "0.8"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "signal",
+    "time",
+]  }
+tower-http = { version = "0.6", features = ["cors"] }
+# rustls rather than the default native-tls: the relay is meant to be dropped onto a
+# small server and run, which it cannot be if it needs an OpenSSL of the right vintage.
+reqwest = { version = "0.12", default-features = false, features = [
+    "stream",
+    "rustls-tls",
+    # Not to use cookies but to be able to say, in code, that it does not: without this
+    # feature `.cookie_store(false)` does not compile and the guarantee is implicit.
+    "cookies",
+] }
+futures-util = "0.3"
+toml = "0.9"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

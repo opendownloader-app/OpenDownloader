@@ -1,0 +1,16 @@
+[package]
+name = "dl-testserver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Local media server for exercising opendownloader's download paths deterministically"
+publish = false
+
+[[bin]]
+name = "dl-testserver"
+path = "src/main.rs"
+
+[dependencies]
+dl-container = { workspace = true, features = ["fixtures"] }
+sha2 = { workspace = true }

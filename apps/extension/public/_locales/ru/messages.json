@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "OpenDownloader — сохранить видео",
+    "description": "The extension name shown in the browser and the store."
+  },
+  "extDescription": {
+    "message": "Сохраняйте видео, аудио и файлы с веб-страниц. Докачка, проверка, конвертация. Бесплатно, открытый код, без загрузок.",
+    "description": "The one-line store description, under 132 characters."
+  }
+}

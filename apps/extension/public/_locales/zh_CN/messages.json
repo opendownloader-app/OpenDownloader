@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "OpenDownloader — 网页视频保存",
+    "description": "The extension name shown in the browser and the store."
+  },
+  "extDescription": {
+    "message": "把网页里的视频、音频和文件保存到电脑。断点续传、校验、转换。完全免费开源，不上传任何内容。",
+    "description": "The one-line store description, under 132 characters."
+  }
+}

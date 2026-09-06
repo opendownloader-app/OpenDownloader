@@ -1,0 +1,51 @@
+===== SEARCH TERMS (Edge Partner Center · 7) =====
+
+wie speichere ich ein video von einer webseite
+video von webseite herunterladen
+video downloader
+vorlesungsvideo speichern
+m3u8 downloader
+unterbrochenen download fortsetzen
+audio aus video extrahieren
+
+
+===== OVERVIEW (Description) =====
+
+Speichern Sie ein Video, eine Audiodatei oder einen Download von einer Webseite auf Ihrem Computer. Alles ist kostenlos, nichts wird hochgeladen, und es muss nichts weiter installiert werden.
+
+Öffnen Sie die Erweiterung auf einer Seite, die gerade etwas abspielt, und sie zeigt an, was sie gefunden hat. Wählen Sie eines aus oder haken Sie mehrere an und holen Sie sich alle auf einmal. Downloads laufen in einem eigenen Tab weiter: Brechen Sie einen ab, schließen Sie den Tab, starten Sie den Browser neu — er macht dort weiter, wo er aufgehört hat, statt von vorn zu beginnen.
+
+WAS SIE KANN
+
+• Findet Videos, Audio, Bilder und Dateien, die eine Seite lädt — auf den Websites, für die Sie sie freischalten
+• Setzt einen unterbrochenen Download fort, statt ihn neu zu starten
+• Lädt parallel über mehrere Verbindungen, damit eine große Datei schneller fertig wird
+• Nimmt beliebig viele Downloads in die Warteschlange und arbeitet sie ab, während Sie etwas anderes tun
+• Prüft jede fertige Datei mit einer SHA-256-Prüfsumme, die von der Festplatte zurückgelesen wird, damit Sie wissen, dass die Kopie unversehrt ist
+• Macht aus einem Stream eine einzige abspielbare MP4-Datei und fügt die Teile zusammen, ohne irgendetwas neu zu kodieren
+• Speichert nur die Tonspur als M4A oder MP3
+• Holt Untertitel als SRT oder WebVTT aus einem Stream und kann sie mit dem eigenen Übersetzer Ihres Browsers übersetzen
+• Konvertiert Video und Audio zwischen MP4, WebM, M4A, MP3, WAV und OGG
+• Repariert einen hängen gebliebenen Download, indem übrig gebliebene .ts-Teile wieder zu einer Datei zusammengefügt werden
+
+KOSTENLOS HEISST KOSTENLOS
+
+Jede der oben genannten Funktionen ist kostenlos und bleibt es. Es gibt kein Konto, keine Anmeldung, keine Testphase, keine Credits, kein Tageslimit und keine Bezahlversion, die irgendetwas zurückhält. Es gibt nichts, worauf man upgraden könnte.
+
+Nichts, was Sie herunterladen, wird irgendwohin geschickt. Es gibt keine Analyse, kein Tracking und keine Werbung. Die Erweiterung fragt den Zugriff einzeln pro Website ab, und solange Sie sie für eine Website nicht freischalten, sieht sie nichts von dem, was dort passiert.
+
+Es gibt auch kein Begleitprogramm. Manche Downloader verlangen, dass Sie zuerst eine separate Hilfsanwendung installieren, bevor ihre Hauptfunktionen arbeiten; diese hier erledigt alles im Browser — kein Installer, kein Hintergrunddienst, und nichts bleibt zurück, wenn Sie sie entfernen.
+
+WAS SIE BEWUSST NICHT TUT
+
+Sie lädt ausschließlich offene Web-Medien. Websites, deren Nutzungsbedingungen oder Kopierschutz das Herunterladen untersagen, werden abgelehnt, und diese Ablehnung steht im Code und nicht auf einer Richtlinienseite — es gibt keine Einstellung, die sie abschaltet. Verschlüsselte Streams werden rundheraus abgelehnt: Es wird nie ein Schlüssel abgerufen und nie etwas entschlüsselt. Live-Streams werden abgelehnt, weil sie kein Ende haben, bis zu dem man herunterladen könnte.
+
+Wenn das nicht das Werkzeug ist, das Sie suchen, dann ist es nicht das Werkzeug, das Sie suchen — und es ist besser, das jetzt zu wissen.
+
+OPEN SOURCE
+
+Das Ganze ist Open Source unter MIT oder Apache-2.0, und die Engine, die entscheidet, was geladen und wie es wieder zusammengesetzt wird, ist in Rust geschrieben. Sie können genau nachlesen, was sie tut, einschließlich der oben beschriebenen Ablehnungen:
+
+https://github.com/opentoolkitsg/opendownloader
+
+Es gibt außerdem eine Website, die dieselbe Aufgabe für einen eingefügten Link erledigt — für den Fall, dass Sie keine Erweiterung installieren können.

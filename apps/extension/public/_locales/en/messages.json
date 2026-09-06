@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "OpenDownloader — save web video",
+    "description": "The extension name shown in the browser and the store."
+  },
+  "extDescription": {
+    "message": "Save video, audio and files from a web page. Resumes, verifies, converts. Free, open source, nothing uploaded.",
+    "description": "The one-line store description, under 132 characters."
+  }
+}

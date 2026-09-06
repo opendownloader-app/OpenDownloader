@@ -1,0 +1,18 @@
+[package]
+name = "dl-container"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure, I/O-free MPEG-TS demuxing and fragmented-MP4 muxing for opendownloader"
+
+[features]
+# Exposes the synthetic MPEG-TS/ADTS builders so the test media server generates
+# the exact same fixtures the unit tests assert against.
+fixtures = []
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

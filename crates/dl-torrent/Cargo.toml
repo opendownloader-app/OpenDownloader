@@ -1,0 +1,23 @@
+[package]
+name = "dl-torrent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Optional local BitTorrent bridge: turns a swarm into an ordinary HTTP resource for the opendownloader web app and extension"
+publish = false
+
+[[bin]]
+name = "dl-torrent"
+path = "src/main.rs"
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures-util = { workspace = true }
+librqbit = { workspace = true }
+tokio-util = { workspace = true }
+anyhow = { workspace = true }

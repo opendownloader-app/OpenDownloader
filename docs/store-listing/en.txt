@@ -1,0 +1,51 @@
+===== SEARCH TERMS (Edge Partner Center · 7) =====
+
+save video from website
+download video from web page
+video downloader
+save lecture video
+m3u8 downloader
+resume interrupted download
+extract audio from video
+
+
+===== OVERVIEW (Description) =====
+
+Save a video, an audio file or a download from a web page to your computer. Everything is free, nothing is uploaded, and there is nothing else to install.
+
+Open the extension on a page that is playing something and it lists what it found. Pick one, or tick several and take them all at once. Downloads keep going in a tab of their own: interrupt one, close the tab, restart the browser, and it carries on from where it stopped instead of starting over.
+
+WHAT IT DOES
+
+• Finds the video, audio, images and files a page loads, on the sites you turn it on for
+• Resumes an interrupted download instead of restarting it
+• Downloads in parallel over several connections, so a big file finishes sooner
+• Queues as many as you like and works through them while you do something else
+• Checks every finished file with a SHA-256 digest read back off the disk, so you know the copy is intact
+• Turns a stream into one playable MP4, joining its pieces without re-encoding anything
+• Saves just the audio as an M4A or MP3
+• Pulls subtitles out of a stream as SRT or WebVTT, and can translate them using your browser's own translator
+• Converts video and audio between MP4, WebM, M4A, MP3, WAV and OGG
+• Repairs a stalled download by joining leftover .ts pieces back into one file
+
+FREE MEANS FREE
+
+Every feature above is free and always will be. There is no account, no sign-in, no trial, no credits, no daily limit, and no paid tier holding anything back. There is nothing to upgrade to.
+
+Nothing you download is sent anywhere. There is no analytics, no tracking, and no advertising. The extension asks for access one site at a time, and until you turn it on for a site it sees nothing that happens there.
+
+There is also no companion program. Some downloaders ask you to install a separate helper application before their main features work; this one does everything inside the browser, so there is no installer, no background service, and nothing left behind if you remove it.
+
+WHAT IT DELIBERATELY WILL NOT DO
+
+It downloads open web media only. Sites whose terms of service or copy protection forbid downloading are refused, and that refusal is written into the code rather than a policy page — there is no setting that turns it off. Encrypted streams are refused outright: no key is ever fetched and nothing is ever decrypted. Live streams are refused because they have no end to download to.
+
+If that is not the tool you are looking for, this is not the tool you are looking for, and it is better to know now.
+
+OPEN SOURCE
+
+The whole thing is open source under MIT or Apache-2.0, and the engine that decides what to fetch and how to rebuild it is written in Rust. You can read exactly what it does, including the refusals above:
+
+https://github.com/opentoolkitsg/opendownloader
+
+There is also a website that does the same job for a link you paste, for when you cannot install an extension.

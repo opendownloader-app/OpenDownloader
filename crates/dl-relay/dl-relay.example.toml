@@ -1,0 +1,33 @@
+# dl-relay configuration.
+#
+# Every field is optional; the values below are the defaults. Copy this to
+# dl-relay.toml (beside the binary, or anywhere and pass the path as the first
+# argument) and change only what you need.
+
+# Where to listen. Loopback by default — put a TLS reverse proxy in front rather
+# than exposing this directly.
+bind = "127.0.0.1:8088"
+
+# CORS. "*" is reasonable for a relay only you use; name your app's origin
+# explicitly if anyone else can reach the port.
+allowed_origins = ["*"]
+
+# Upstream hosts this relay will talk to. An entry covers the host and its
+# subdomains. Empty means "any host the compliance policy already permits".
+allow_hosts = []
+
+# Off unless you mean it. On, every client of this relay can reach every host
+# this relay can reach — including everything on its LAN and any cloud metadata
+# endpoint. Only turn it on for a relay bound to loopback on a machine you own.
+allow_private_hosts = false
+
+# Ceiling on one relayed response, in bytes. 20 GiB. Enforced from the upstream
+# content-length and again while streaming, since a chunked response has no length.
+max_bytes = 21474836480
+
+# Simultaneous upstream requests. Anything over this is answered 503.
+max_concurrent = 8
+
+# Connect plus response-headers timeout. NOT a whole-body timeout: a large file
+# over a slow link is the normal case here.
+timeout_seconds = 30

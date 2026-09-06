@@ -1,0 +1,165 @@
+// End-to-end: the queue, in a real browser.
+//
+// The download engine has its own tests; these cover the part that only exists
+// once several downloads compete — that a batch runs unattended, that the
+// concurrency limit is respected, that pausing everything actually stops it, and
+// that an expected digest is compared rather than merely displayed.
+
+import { enqueue, expect, test, waitForStatus } from "./fixtures";
+
+/** Read the settings the manager persists, through the page's own storage. */
+async function setSettings(
+  page: import("@playwright/test").Page,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  await page.evaluate(async (p) => {
+    await (globalThis as any).__test.updateSettings(p);
+  }, patch);
+}
+
+test("a batch of downloads runs to completion with no further clicks", async ({
+  manager,
+  serverUrl,
+}) => {
+  const size = 64 * 1024;
+  const expected = (await (await fetch(`${serverUrl}/fixture.sha256?size=${size}`)).text()).trim();
+
+  const ids: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    ids.push(
+      await enqueue(manager, {
+        // Distinct URLs, since the job id is derived from the URL — three jobs
+        // for one URL would be one job.
+        url: `${serverUrl}/fixture.bin?size=${size}&n=${i}`,
+        kind: "progressive",
+        filename: `batch-${i}.bin`,
+        size,
+      }),
+    );
+  }
+
+  for (const id of ids) {
+    const job = await waitForStatus(manager, id, ["done", "error"]);
+    expect(job.status).toBe("done");
+    // Same bytes from the same generator, so the same digest — which also
+    // proves the three concurrent jobs did not write into each other's chunks.
+    expect(job.sha256).toBe(expected);
+  }
+});
+
+test("no more than the configured number of downloads run at once", async ({
+  manager,
+  serverUrl,
+}) => {
+  await setSettings(manager, { maxConcurrentJobs: 2 });
+
+  // Big enough that the jobs genuinely overlap rather than finishing one by one
+  // before the next is even started.
+  const size = 4 * 1024 * 1024;
+  for (let i = 0; i < 5; i++) {
+    await enqueue(manager, {
+      url: `${serverUrl}/fixture.bin?size=${size}&n=${i}`,
+      kind: "progressive",
+      filename: `limit-${i}.bin`,
+      size,
+    });
+  }
+
+  // Sample the live count repeatedly while the batch drains. A single sample
+  // could easily miss an overshoot.
+  let peak = 0;
+  for (let i = 0; i < 40; i++) {
+    const active = await manager.evaluate(
+      async () => (globalThis as any).__test.manager.activeCount() as number,
+    );
+    peak = Math.max(peak, active);
+    const jobs = await manager.evaluate(async () => (globalThis as any).__test.listJobs());
+    if (jobs.every((j: { status: string }) => j.status === "done" || j.status === "error")) break;
+    await manager.waitForTimeout(250);
+  }
+
+  expect(peak).toBeGreaterThan(0);
+  expect(peak).toBeLessThanOrEqual(2);
+});
+
+test("an expected digest that does not match is reported, not hidden", async ({
+  manager,
+  serverUrl,
+}) => {
+  const size = 32 * 1024;
+  const real = (await (await fetch(`${serverUrl}/fixture.sha256?size=${size}`)).text()).trim();
+
+  const wrong = await enqueue(
+    manager,
+    {
+      url: `${serverUrl}/fixture.bin?size=${size}&n=wrong`,
+      kind: "progressive",
+      filename: "mismatch.bin",
+      size,
+    },
+    { expectedSha256: "0".repeat(64) },
+  );
+  const right = await enqueue(
+    manager,
+    {
+      url: `${serverUrl}/fixture.bin?size=${size}&n=right`,
+      kind: "progressive",
+      filename: "match.bin",
+      size,
+    },
+    { expectedSha256: real },
+  );
+
+  const bad = await waitForStatus(manager, wrong, ["done", "error"]);
+  // The file downloaded fine; it is the *claim about it* that failed, so the
+  // job is done with a mismatch rather than errored.
+  expect(bad.status).toBe("done");
+  expect(bad.verification).toBe("mismatch");
+  expect(bad.sha256).toBe(real);
+
+  const good = await waitForStatus(manager, right, ["done", "error"]);
+  expect(good.status).toBe("done");
+  expect(good.verification).toBe("verified");
+
+  await expect(manager.getByText("hash mismatch")).toBeVisible();
+  await expect(manager.getByText("verified", { exact: true })).toBeVisible();
+});
+
+test("pause all stops the queue, and resume all restarts it", async ({ manager, serverUrl }) => {
+  const size = 4 * 1024 * 1024;
+  const ids: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    ids.push(
+      await enqueue(manager, {
+        url: `${serverUrl}/fixture.bin?size=${size}&n=pause${i}`,
+        kind: "progressive",
+        filename: `pause-${i}.bin`,
+        size,
+      }),
+    );
+  }
+
+  await manager.getByRole("button", { name: "Pause all" }).click({ timeout: 20_000 });
+
+  // Everything must come to rest: nothing running, and nothing left queued that
+  // would quietly start again.
+  await expect
+    .poll(
+      async () =>
+        manager.evaluate(async () => (globalThis as any).__test.manager.activeCount() as number),
+      { timeout: 20_000 },
+    )
+    .toBe(0);
+
+  const midway = await manager.evaluate(async () => (globalThis as any).__test.listJobs());
+  expect(
+    midway.some((j: { status: string }) => j.status === "paused" || j.status === "queued"),
+  ).toBe(true);
+
+  await manager.getByRole("button", { name: "Resume all" }).click({ timeout: 20_000 });
+
+  for (const id of ids) {
+    const job = await waitForStatus(manager, id, ["done", "error"], 90_000);
+    expect(job.status).toBe("done");
+  }
+});

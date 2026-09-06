@@ -1,0 +1,29 @@
+[package]
+name = "dl-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure, I/O-free download planning, classification, HLS handling and integrity for opendownloader"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["platform-sites"]
+# The large-platform extractors (YouTube, Bilibili, TikTok, Douyin, Instagram, Facebook,
+# WeChat). Off for a build destined for the Chrome Web Store or Edge Add-ons, whose
+# developer policies prohibit downloading from YouTube — a store build must not contain
+# the code, not merely decline to run it.
+platform-sites = []
+
+[dependencies]
+dl-container = { workspace = true }
+sha2 = { workspace = true }
+md4 = { workspace = true }
+m3u8-rs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }

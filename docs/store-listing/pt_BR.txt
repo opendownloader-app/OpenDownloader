@@ -1,0 +1,51 @@
+===== SEARCH TERMS (Edge Partner Center · 7) =====
+
+como salvar um vídeo de um site
+baixar vídeo de página da web
+downloader de vídeo
+salvar vídeo de aula
+baixar m3u8
+retomar download interrompido
+extrair áudio de vídeo
+
+
+===== OVERVIEW (Description) =====
+
+Salve um vídeo, um arquivo de áudio ou um download de uma página da web no seu computador. Tudo é gratuito, nada é enviado para lugar nenhum e não há mais nada para instalar.
+
+Abra a extensão em uma página que esteja reproduzindo algo e ela lista o que encontrou. Escolha um item, ou marque vários e baixe todos de uma vez. Os downloads continuam em uma aba própria: interrompa um, feche a aba, reinicie o navegador — ele retoma de onde parou em vez de começar do zero.
+
+O QUE ELA FAZ
+
+• Encontra os vídeos, áudios, imagens e arquivos que a página carrega, nos sites em que você a ativar
+• Retoma um download interrompido em vez de reiniciá-lo
+• Baixa em paralelo por várias conexões, para um arquivo grande terminar mais rápido
+• Coloca na fila quantos downloads você quiser e vai concluindo enquanto você faz outra coisa
+• Confere cada arquivo concluído com um hash SHA-256 lido de volta do disco, para você saber que a cópia está íntegra
+• Junta um stream em um único MP4 reproduzível, unindo os pedaços sem recodificar nada
+• Salva apenas o áudio em M4A ou MP3
+• Extrai as legendas de um stream em SRT ou WebVTT, e pode traduzi-las com o tradutor do próprio navegador
+• Converte vídeo e áudio entre MP4, WebM, M4A, MP3, WAV e OGG
+• Conserta um download travado juntando os pedaços .ts que sobraram em um arquivo só
+
+GRATUITO É GRATUITO MESMO
+
+Todos os recursos acima são gratuitos e sempre serão. Não tem conta, não tem login, não tem período de teste, não tem créditos, não tem limite diário e não tem versão paga segurando nada. Não existe nada para onde fazer upgrade.
+
+Nada do que você baixa é enviado para lugar nenhum. Não há analytics, não há rastreamento e não há publicidade. A extensão pede acesso a um site de cada vez e, enquanto você não a ativar para um site, ela não vê nada do que acontece lá.
+
+Também não há programa complementar. Alguns downloaders exigem que você instale um aplicativo auxiliar separado antes que os recursos principais funcionem; este aqui faz tudo dentro do navegador: sem instalador, sem serviço em segundo plano e sem deixar nada para trás se você removê-lo.
+
+O QUE ELA DELIBERADAMENTE NÃO FAZ
+
+Ela baixa apenas mídia aberta da web. Sites cujos termos de serviço ou proteção contra cópia proíbem o download são recusados, e essa recusa está escrita no código, não em uma página de políticas — não existe configuração que a desligue. Streams criptografados são recusados de saída: nenhuma chave é buscada e nada é descriptografado. Transmissões ao vivo são recusadas porque não têm um fim até o qual baixar.
+
+Se não for essa a ferramenta que você procura, então não é essa a ferramenta que você procura, e é melhor saber agora.
+
+CÓDIGO ABERTO
+
+O projeto inteiro é de código aberto sob MIT ou Apache-2.0, e o motor que decide o que buscar e como remontar é escrito em Rust. Você pode ler exatamente o que ele faz, inclusive as recusas acima:
+
+https://github.com/opentoolkitsg/opendownloader
+
+Há também um site que faz o mesmo trabalho com um link colado, para quando você não puder instalar uma extensão.
