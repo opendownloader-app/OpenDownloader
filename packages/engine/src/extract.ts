@@ -323,6 +323,21 @@ export async function supportedSites(): Promise<SupportedSite[]> {
   return JSON.parse(core.supported_sites()) as SupportedSite[];
 }
 
+/** A source with no extractor: a link kind rather than a website. */
+export interface SupportedSource {
+  name: string;
+  /** What the user pastes, in words — these have no single URL shape. */
+  accepts: string;
+  /** True when a program on the user's own machine has to be running. */
+  needsLocalHelper: boolean;
+}
+
+/** Every non-extractor source this build accepts — Mega, Quark, torrents, ed2k, Xunlei. */
+export async function supportedSources(): Promise<SupportedSource[]> {
+  const core = await loadCore();
+  return JSON.parse(core.supported_sources()) as SupportedSource[];
+}
+
 /**
  * The job kind an option's first stream should be downloaded as.
  *

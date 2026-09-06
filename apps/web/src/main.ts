@@ -22,13 +22,23 @@ import {
   looksLikeCorsFailure,
   pair,
   pairingProblem,
+  isMegaLink,
+  isQuarkShare,
+  listQuarkFolder,
   parseEd2kLink,
+  QuarkNeedsAccount,
+  readQuarkShare,
+  resolveMegaFile,
+  resolveQuarkDownload,
+  type QuarkEntry,
+  type QuarkShare,
   putJob,
   remuxLocalSegments,
   resolveDownloadLink,
   siteAcceptsFetchedPage,
   siteWorksWithoutATab,
   supportedSites,
+  supportedSources,
   siteFor,
   updateSettings,
   webPlatform,
@@ -130,6 +140,21 @@ async function fetchPageState(url: string): Promise<string> {
  * health check, never guessed at anywhere else.
  */
 const LOCAL_TORRENT_BRIDGE = "http://127.0.0.1:8089";
+
+/**
+ * Whether this page can reach a helper on loopback at all.
+ *
+ * It cannot when the page itself is served over https: the browser refuses an `http://`
+ * subresource from an `https://` page, and answering Chrome's private-network preflight
+ * does not lift it — measured, not assumed. So on the deployed site the relay and the
+ * torrent bridge are unreachable no matter what the visitor runs, and telling them to
+ * "start it and reload" is advice that cannot work. Served from loopback itself — which
+ * is what `npm start` does — both are reachable.
+ */
+const CAN_REACH_LOOPBACK =
+  location.protocol !== "https:" ||
+  location.hostname === "127.0.0.1" ||
+  location.hostname === "localhost";
 let torrentBridge: string | null = null;
 
 async function adoptTorrentBridge(): Promise<void> {
@@ -161,11 +186,18 @@ async function addFromTorrent(link: string): Promise<boolean> {
   if (/^ed2k:/i.test(link)) return addFromEd2k(link);
   if (!torrentBridge) {
     throw new Error(
-      "This is a BitTorrent link, and a browser tab cannot join a swarm — that needs " +
-        "TCP connections to other people's machines, which no page, permission or relay " +
-        "can open. OpenDownloader ships a local bridge that does it for you: run " +
-        "`npm start` (or `cargo run -p dl-torrent`) and reload this page, and the files " +
-        "inside the torrent will be listed here like any other download.",
+      CAN_REACH_LOOPBACK
+        ? "This is a BitTorrent link, and a browser tab cannot join a swarm — that needs " +
+            "TCP connections to other people's machines, which no page, permission or " +
+            "relay can open. OpenDownloader ships a local bridge that does it for you: " +
+            "run `npm start` (or `cargo run -p dl-torrent`) and reload this page, and the " +
+            "files inside the torrent will be listed here like any other download."
+        : "This is a BitTorrent link, and a browser tab cannot join a swarm. The bridge " +
+            "that can is a program you run on your own machine — but this page is served " +
+            "over https, and a secure page is not allowed to talk to a plain-http service " +
+            "on your computer, whatever you start. Run the web app locally instead: clone " +
+            "the repository, run `npm start`, and open http://127.0.0.1:5180 — the bridge " +
+            "and the relay both work from there.",
     );
   }
 
@@ -256,6 +288,196 @@ async function addFromEd2k(link: string): Promise<boolean> {
   );
   statusEl.textContent = `Queued ${parsed.filename}. It will be checked against the eD2k hash in the link.`;
   return true;
+}
+
+/**
+ * Act on a Mega link.
+ *
+ * Mega is the one storage service that works from a plain page, and the reason is worth
+ * stating: its API answers `Access-Control-Allow-Origin: *`, and the decryption key lives
+ * in the URL fragment, which a browser never sends anywhere. So the key reaches Mega
+ * neither through us nor at all, and the file is decrypted on its way to disk.
+ *
+ * Returns false when this is not a Mega link, so the caller carries on.
+ */
+async function addFromMega(url: string): Promise<boolean> {
+  if (!(await isMegaLink(url))) return false;
+
+  statusEl.textContent = "Asking Mega about that file\u2026";
+  const file = await resolveMegaFile(url);
+
+  await manager.enqueue(
+    {
+      url: file.url,
+      kind: "progressive",
+      // The name came out of the encrypted attribute blob, not the URL \u2014 a Mega
+      // download URL is an opaque host and id and would name every file the same.
+      filename: file.filename,
+      mime: null,
+      size: file.size,
+    },
+    { start: true, decrypt: { key: file.key, nonce: file.nonce } },
+  );
+  statusEl.textContent = `Queued ${file.filename}.`;
+  return true;
+}
+
+/**
+ * Open a Quark share and show what is in it.
+ *
+ * Returns false when this is not a Quark link, so the caller carries on.
+ *
+ * Quark is the one supported source where reading the share and fetching a file are
+ * separate permissions. Anyone may read: the listing below is the same tree the share
+ * page shows a visitor. Fetching is Quark's own gate, and it is not opened here \u2014 see
+ * `queueQuarkFile`.
+ */
+async function addFromQuark(url: string): Promise<boolean> {
+  if (!(await isQuarkShare(url))) return false;
+
+  if (!relay.enabled || !relay.url) {
+    throw new Error(
+      CAN_REACH_LOOPBACK
+        ? "Quark's API answers only its own site, so a page cannot call it and this " +
+            "needs the local relay. Run `npm start` and reload, and the share will be " +
+            "listed here."
+        : "Quark's API answers only its own site, so reading a share needs the relay \u2014 " +
+            "a program you run on your own machine. This page is served over https and " +
+            "is not allowed to talk to a plain-http service on your computer. Run the " +
+            "web app locally instead: clone the repository, run `npm start`, and open " +
+            "http://127.0.0.1:5180.",
+    );
+  }
+
+  statusEl.textContent = "Opening that Quark share\u2026";
+  const share = await readQuarkShare(url);
+  renderQuarkEntries(share, share.title, share.entries, []);
+  statusEl.textContent = "";
+  return true;
+}
+
+/**
+ * Show one directory of a share, with a way back up.
+ *
+ * `trail` is the folders opened to get here, so the caller can walk back out without a
+ * second round trip \u2014 the entries are already in hand.
+ */
+function renderQuarkEntries(
+  share: QuarkShare,
+  title: string,
+  entries: QuarkEntry[],
+  trail: { name: string; entries: QuarkEntry[] }[],
+): void {
+  siteOptionsEl.replaceChildren();
+  siteOptionsEl.hidden = false;
+
+  const heading = document.createElement("p");
+  heading.className = "muted";
+  heading.textContent = trail.length
+    ? `${share.title} \u2014 ${[...trail.map((t) => t.name), title].slice(1).join(" / ")}`
+    : `${share.title} \u2014 ${entries.length} item${entries.length === 1 ? "" : "s"}`;
+  siteOptionsEl.append(heading);
+
+  if (trail.length) {
+    const up = trail[trail.length - 1]!;
+    siteOptionsEl.append(
+      choiceRow("\u2191 Up a level", up.name, () => {
+        renderQuarkEntries(share, up.name, up.entries, trail.slice(0, -1));
+      }),
+    );
+  }
+
+  // Folders first, then files: a share is browsed, and a directory listing that
+  // interleaves the two is harder to scan than one that does not.
+  const sorted = [...entries].sort((a, b) =>
+    a.isDir === b.isDir ? b.size - a.size : a.isDir ? -1 : 1,
+  );
+  for (const entry of sorted) {
+    siteOptionsEl.append(
+      entry.isDir
+        ? choiceRow(`\u{1F4C1} ${entry.name}`, "folder", () => {
+            void openQuarkFolder(share, entry, entries, title, trail);
+          })
+        : choiceRow(entry.name, formatSize(entry.size), () => {
+            void queueQuarkFile(share, entry);
+          }),
+    );
+  }
+
+  const note = document.createElement("p");
+  note.className = "muted hint";
+  note.textContent =
+    "Quark lets anyone read a share, but hands over the files only to an account it " +
+    "recognises \u2014 so a file here may answer with a refusal rather than a download.";
+  siteOptionsEl.append(note);
+}
+
+async function openQuarkFolder(
+  share: QuarkShare,
+  folder: QuarkEntry,
+  siblings: QuarkEntry[],
+  title: string,
+  trail: { name: string; entries: QuarkEntry[] }[],
+): Promise<void> {
+  statusEl.className = "muted";
+  statusEl.textContent = `Opening ${folder.name}\u2026`;
+  try {
+    const entries = await listQuarkFolder(share, folder.fid);
+    renderQuarkEntries(share, folder.name, entries, [
+      ...trail,
+      { name: title, entries: siblings },
+    ]);
+    statusEl.textContent = "";
+  } catch (e) {
+    statusEl.className = "status-error";
+    statusEl.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+/**
+ * Try to fetch one file from a share.
+ *
+ * The request is made rather than pre-judged. Quark decides whether a visitor may have a
+ * given file, and the only measurement behind this is one share, where it refused every
+ * file from 155 MB to 61 GB \u2014 not enough to tell a user their share will refuse too.
+ * So it asks, and turns a refusal into a sentence that says what would lift it.
+ */
+async function queueQuarkFile(
+  share: QuarkShare,
+  entry: QuarkEntry,
+): Promise<void> {
+  statusEl.className = "muted";
+  statusEl.textContent = `Asking Quark for ${entry.name}\u2026`;
+  try {
+    const url = await resolveQuarkDownload(share, entry);
+    await manager.enqueue(
+      {
+        url,
+        kind: "progressive",
+        filename: entry.name,
+        mime: null,
+        size: entry.size,
+      },
+      { start: true },
+    );
+    siteOptionsEl.hidden = true;
+    statusEl.textContent = `Queued ${entry.name}.`;
+  } catch (e) {
+    statusEl.className = "status-error";
+    statusEl.replaceChildren(
+      document.createTextNode(
+        (e instanceof Error ? e.message : String(e)) + " ",
+      ),
+    );
+    if (e instanceof QuarkNeedsAccount) {
+      const a = document.createElement("a");
+      a.href = `https://pan.quark.cn/s/${share.pwdId}`;
+      a.target = "_blank";
+      a.rel = "noreferrer";
+      a.textContent = "Open the share on Quark";
+      statusEl.append(a);
+    }
+  }
 }
 
 /**
@@ -676,6 +898,23 @@ async function renderSupportedSites(root: HTMLElement | null): Promise<void> {
         return chip;
       }),
     );
+    // The link kinds, after the websites. Same chips, different question: a website
+    // entry answers "can this page read it", a source entry answers "does this need a
+    // program running on your machine".
+    for (const source of await supportedSources()) {
+      const chip = document.createElement("span");
+      chip.className = source.needsLocalHelper ? "site" : "site here";
+      const name = document.createElement("span");
+      name.textContent = source.name;
+      const where = document.createElement("span");
+      where.className = "where";
+      where.textContent = source.needsLocalHelper ? "local helper" : "here";
+      chip.append(name, where);
+      chip.title = source.needsLocalHelper
+        ? `Accepts ${source.accepts} — needs the local helper running.`
+        : `Accepts ${source.accepts}.`;
+      root.append(chip);
+    }
   } catch {
     // The list is a courtesy; the link box works without it, and an error here would say
     // nothing a visitor could act on.
@@ -695,6 +934,19 @@ async function add(): Promise<void> {
     // When no bridge is running this throws with how to start one, rather than with the
     // flat "not possible" it used to.
     if (await addFromTorrent(typed)) {
+      urlInput.value = "";
+      return;
+    }
+
+    // A Quark share is a directory, not a file: it is listed rather than queued.
+    if (await addFromQuark(typed)) {
+      urlInput.value = "";
+      return;
+    }
+
+    // Mega before the generic path: a mega.nz link is a page, not a file, and the
+    // bytes behind it are encrypted with a key only this link carries.
+    if (await addFromMega(typed)) {
       urlInput.value = "";
       return;
     }
@@ -751,10 +1003,15 @@ async function add(): Promise<void> {
       !relay.enabled &&
       (/\b403\b|refused this request/.test(message) || looksLikeCorsFailure(e))
     ) {
-      statusEl.textContent =
-        "That site will not answer a web page directly — it refuses every origin but its " +
-        "own. Run the relay (npm start does it, on port 8088) and this page will find it " +
-        "on reload, or use the browser extension, which is never subject to this.";
+      statusEl.textContent = CAN_REACH_LOOPBACK
+        ? "That site will not answer a web page directly — it refuses every origin but " +
+          "its own. Run the relay (npm start does it, on port 8088) and this page will " +
+          "find it on reload, or use the browser extension, which is never subject to this."
+        : "That site will not answer a web page directly — it refuses every origin but " +
+          "its own. The relay that gets around it runs on your machine, and this page " +
+          "is served over https, which is not allowed to talk to a plain-http service " +
+          "there — so starting one will not help here. Use the browser extension, which " +
+          "is never subject to any of this, or run the web app locally with `npm start`.";
       goButton.disabled = false;
       return;
     }

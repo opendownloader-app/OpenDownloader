@@ -608,6 +608,56 @@ pub fn supported_sites() -> Vec<SiteInfo> {
     sites
 }
 
+/// A source that is downloadable but has no extractor.
+///
+/// Kept apart from {@link supported_sites} on purpose. That list is checked against the
+/// extractor registry entry by entry, and every one of these would fail that check for
+/// the right reason: there is no page to read and nothing to extract. A magnet names a
+/// swarm, a Mega link carries its own decryption key, a Quark link opens a directory.
+/// Folding them in would mean loosening the test that keeps the site list honest.
+#[derive(Debug, Clone, Serialize)]
+pub struct SourceInfo {
+    pub name: &'static str,
+    /// What the user pastes, in words rather than a URL — these have no single shape.
+    pub accepts: &'static str,
+    /// Whether the web app alone can do it, or a local helper has to be running.
+    pub needs_local_helper: bool,
+}
+
+/// Every non-extractor source this build accepts.
+pub fn supported_sources() -> Vec<SourceInfo> {
+    vec![
+        SourceInfo {
+            name: "Mega",
+            accepts: "mega.nz file links",
+            // Mega's API allows every origin, and the key is in the fragment. This is
+            // the one storage service a plain page can do end to end.
+            needs_local_helper: false,
+        },
+        SourceInfo {
+            name: "Quark",
+            accepts: "pan.quark.cn share links",
+            // Quark's API answers only its own origin, so the relay has to make the call.
+            needs_local_helper: true,
+        },
+        SourceInfo {
+            name: "BitTorrent",
+            accepts: "magnet links and .torrent files",
+            needs_local_helper: true,
+        },
+        SourceInfo {
+            name: "eD2k",
+            accepts: "ed2k:// links that carry a web source",
+            needs_local_helper: false,
+        },
+        SourceInfo {
+            name: "Xunlei",
+            accepts: "thunder://, flashget:// and qqdl:// links",
+            needs_local_helper: false,
+        },
+    ]
+}
+
 /// Whether this build carries the large-platform extractors.
 pub const fn has_platform_sites() -> bool {
     cfg!(feature = "platform-sites")

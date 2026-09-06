@@ -39,7 +39,14 @@ pub struct MediaCandidate {
 }
 
 /// MIME types we treat as directly downloadable media.
-const PROGRESSIVE_MIME_PREFIXES: &[&str] = &["video/", "audio/", "image/"];
+/// What counts as media worth offering.
+///
+/// Images are deliberately absent. They were here, and on a page like a TikTok or Douyin
+/// feed that meant sixty-odd thumbnails crowding out the one video someone came for —
+/// the popup listed avatars and preview frames beside the file they wanted. A browser
+/// already saves an image in two clicks; this is a video and audio downloader, and the
+/// list is only useful if everything in it is something you would plausibly download.
+const PROGRESSIVE_MIME_PREFIXES: &[&str] = &["video/", "audio/"];
 
 /// Non-media MIME types worth offering anyway — the "downloader", not "video grabber",
 /// half of the product.
@@ -149,10 +156,15 @@ fn is_progressive_mime(mime: &str) -> bool {
 }
 
 fn is_progressive_extension(ext: &str) -> bool {
+    // Image extensions are absent for the same reason as the image MIME prefix above:
+    // a page loads dozens of them by itself, and every one became a download candidate.
+    //
+    // Documents and archives stay. The distinction is not arbitrary — a page does not
+    // quietly fetch forty PDFs while you watch a video, so they never crowd anything out,
+    // and a direct link to one is a thing somebody deliberately opened.
     const EXTS: &[&str] = &[
         "mp4", "m4v", "mov", "webm", "mkv", "avi", "flv", "ogv", "mp3", "m4a", "aac", "flac",
-        "wav", "ogg", "opus", "jpg", "jpeg", "png", "gif", "webp", "avif", "svg", "pdf", "zip",
-        "gz", "tar", "7z", "rar", "epub",
+        "wav", "ogg", "opus", "pdf", "zip", "gz", "tar", "7z", "rar", "epub",
     ];
     EXTS.contains(&ext)
 }
@@ -452,5 +464,54 @@ mod tests {
         let mut m = meta("https://cdn.x/a.mp4", Some("video/mp4"));
         m.content_length = Some(1234);
         assert_eq!(classify(&m).unwrap().size, Some(1234));
+    }
+}
+
+#[cfg(test)]
+mod images_are_not_media {
+    use super::*;
+
+    fn meta(url: &str, content_type: Option<&str>) -> RequestMeta {
+        RequestMeta {
+            url: url.to_string(),
+            page_origin: "https://example.com".to_string(),
+            content_type: content_type.map(str::to_string),
+            content_length: Some(4096),
+            content_disposition: None,
+        }
+    }
+
+    /// A feed page loads dozens of thumbnails and avatars. Every one of them used to be
+    /// offered, which buried the single video someone actually came for — sixty-one
+    /// candidates on a Douyin page, almost all of them pictures.
+    #[test]
+    fn an_image_is_never_offered_as_a_download() {
+        for (url, mime) in [
+            ("https://cdn.example.com/thumb.jpg", Some("image/jpeg")),
+            ("https://cdn.example.com/avatar.png", Some("image/png")),
+            ("https://cdn.example.com/cover.webp", Some("image/webp")),
+            ("https://cdn.example.com/icon.svg", Some("image/svg+xml")),
+            // No Content-Type at all: the URL must not rescue it either.
+            ("https://cdn.example.com/preview.jpg", None),
+        ] {
+            assert!(
+                classify(&meta(url, mime)).is_none(),
+                "should not be offered: {url} ({mime:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn video_and_audio_are_still_offered() {
+        for (url, mime) in [
+            ("https://cdn.example.com/clip.mp4", Some("video/mp4")),
+            ("https://cdn.example.com/song.m4a", Some("audio/mp4")),
+            ("https://cdn.example.com/clip.mp4", None),
+        ] {
+            assert!(
+                classify(&meta(url, mime)).is_some(),
+                "should still be offered: {url} ({mime:?})"
+            );
+        }
     }
 }

@@ -102,6 +102,29 @@ fn after<'a>(haystack: &'a str, needle: &str) -> Option<&'a str> {
     haystack.find(needle).map(|i| &haystack[i + needle.len()..])
 }
 
+/// Standard base64, for handing key material across the wasm boundary where `atob` is
+/// waiting on the other side.
+pub fn base64_encode(bytes: &[u8]) -> String {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(A[((n >> (18 - i * 6)) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 /// Mega uses base64url without padding, and its keys are fixed length, so a decoder
 /// that ignores padding entirely is both correct here and shorter than a dependency.
 fn base64url_decode(input: &str) -> Option<Vec<u8>> {
@@ -234,6 +257,24 @@ mod tests {
             "https://notmega.nz.evil.test/file/A#B",
         ] {
             assert_eq!(parse(url), None, "should not parse: {url}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod encoding {
+    use super::*;
+    use crate::links::base64_decode;
+
+    #[test]
+    fn what_is_encoded_decodes_back() {
+        // The encoder exists to hand key bytes to JavaScript's `atob`, so the only
+        // property that matters is that the round trip is exact — including the
+        // lengths Mega actually uses.
+        for len in [1usize, 8, 15, 16, 24, 32] {
+            let bytes: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
+            let round = base64_decode(&base64_encode(&bytes)).expect("decodes");
+            assert_eq!(round, bytes, "round trip failed at {len} bytes");
         }
     }
 }

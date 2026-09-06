@@ -324,6 +324,42 @@ pub fn peer_link_refusal(url: &str) -> Option<String> {
     crate::links::peer_link_refusal(url)
 }
 
+/// Read a Mega file link, or `None` when it is not one.
+///
+/// `{"handle":…,"key":…,"nonce":…,"metaMac":…}`, the three byte fields base64 so the
+/// caller can `atob` them straight into WebCrypto. The key never went near a network:
+/// it lives in the URL fragment, which browsers do not send.
+#[wasm_bindgen]
+pub fn parse_mega_link(url: &str) -> Option<String> {
+    let link = crate::mega::parse(url)?;
+    serde_json::to_string(&serde_json::json!({
+        "handle": link.handle,
+        "key": crate::mega::base64_encode(&link.key),
+        "nonce": crate::mega::base64_encode(&link.nonce),
+        "metaMac": crate::mega::base64_encode(&link.meta_mac),
+    }))
+    .ok()
+}
+
+/// Whether this URL is a Mega *folder* link, which names a directory rather than a file.
+#[wasm_bindgen]
+pub fn is_mega_folder_link(url: &str) -> bool {
+    crate::mega::is_folder_link(url)
+}
+
+/// Read a Quark share link, or `None` when it is not one.
+///
+/// `{"pwdId":…,"passcode":…}` — the two values the share's token call takes.
+#[wasm_bindgen]
+pub fn parse_quark_share(url: &str) -> Option<String> {
+    let share = crate::quark::parse(url)?;
+    serde_json::to_string(&serde_json::json!({
+        "pwdId": share.pwd_id,
+        "passcode": share.passcode,
+    }))
+    .ok()
+}
+
 /// Whether a stream is an HLS playlist rather than a file.
 ///
 /// Front ends ask before deciding what kind of job to create; guessing produced a
@@ -343,6 +379,25 @@ pub fn site_is_supported(url: &str) -> bool {
 #[wasm_bindgen]
 pub fn site_name_for(url: &str) -> Option<String> {
     crate::sites::site_for(url).map(str::to_string)
+}
+
+/// Every non-extractor source this build accepts, as JSON.
+///
+/// `[{"name":…,"accepts":…,"needsLocalHelper":bool}]`. Separate from `supported_sites`
+/// because these have no page to extract from and no single URL shape.
+#[wasm_bindgen]
+pub fn supported_sources() -> String {
+    let sources: Vec<_> = crate::sites::supported_sources()
+        .into_iter()
+        .map(|s| {
+            serde_json::json!({
+                "name": s.name,
+                "accepts": s.accepts,
+                "needsLocalHelper": s.needs_local_helper,
+            })
+        })
+        .collect();
+    serde_json::to_string(&sources).unwrap_or_else(|_| "[]".to_string())
 }
 
 /// Every site with a dedicated extractor in this build, as JSON.

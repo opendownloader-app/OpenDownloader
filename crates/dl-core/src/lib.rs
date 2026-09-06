@@ -18,6 +18,7 @@ pub mod links;
 pub mod mega;
 pub mod plan;
 pub mod policy;
+pub mod quark;
 pub mod session;
 pub mod sites;
 pub mod subs;

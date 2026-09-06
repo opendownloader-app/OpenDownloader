@@ -11,6 +11,7 @@ import {
   canOpenSinkSilently,
   deleteJob,
   enqueueCandidate,
+  type EnqueueOptions,
   fetchSubtitleRendition,
   formatEta,
   formatSize,
@@ -116,13 +117,11 @@ export class Manager {
    */
   async enqueue(
     candidate: MediaCandidate,
-    opts: {
-      audioOnly?: boolean;
-      pageUrl?: string;
-      start?: boolean;
-      expectedSha256?: string | null;
-      expectedEd2k?: string | null;
-    } = {},
+    // The engine's own option type, not a copy of it. This was a hand-written
+    // duplicate, and it silently dropped every option the engine grew after it
+    // was written — a caller could pass `decrypt` and watch it vanish with no
+    // error anywhere.
+    opts: EnqueueOptions & { start?: boolean } = {},
   ): Promise<Job> {
     const job = await enqueueCandidate(candidate, opts);
     await this.refresh();
@@ -822,6 +821,19 @@ export async function candidateForUrl(input: string): Promise<MediaCandidate> {
   // wrapper. Unwrapped here rather than at each call site, so every host that accepts a
   // pasted link accepts these too.
   const url = core.resolve_download_link(input) ?? input;
+
+  // A page on a site with its own extractor is not a media file, and saying "that link
+  // does not look like a media file" about a Vimeo page is technically true and useless.
+  // This box classifies a URL by what the server returns; extraction happens in the
+  // popup, on the page itself. Name the site and say where to go.
+  if (core.site_is_supported(url)) {
+    const site = core.site_name_for(url) ?? "that site";
+    throw new Error(
+      `That is a ${site} page, not a media file. Open it in a tab and use the ` +
+        `extension there — it reads the page and offers the qualities ${site} has. ` +
+        `This box takes a direct link to a file or an .m3u8 playlist.`,
+    );
+  }
 
   let parsed: URL;
   try {

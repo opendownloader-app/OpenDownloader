@@ -152,7 +152,7 @@ pub fn peer_link_refusal(url: &str) -> Option<String> {
 /// crate, the alphabet is fixed, and a decoder is shorter than the argument for adding a
 /// crate to a WebAssembly bundle. Accepts the URL-safe alphabet too, since links copied
 /// out of a page are sometimes re-encoded that way, and ignores whitespace and padding.
-fn base64_decode(input: &str) -> Option<Vec<u8>> {
+pub(crate) fn base64_decode(input: &str) -> Option<Vec<u8>> {
     let mut bits = 0u32;
     let mut have = 0u32;
     let mut out = Vec::with_capacity(input.len() * 3 / 4);
