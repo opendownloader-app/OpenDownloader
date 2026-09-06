@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in — OpenDownloader</title>
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="./icon-32.png" sizes="32x32" />
+    <link rel="stylesheet" href="../../packages/ui/src/base.css" />
+    <style>
+      /* A page with nothing to lose.
+         `<openapps-login>`'s Google button is a full-page redirect out to
+         accounts.google.com and back. Run on the app page, that redirect destroys
+         whatever the tab was holding — and this tab holds the download queue, so it
+         would interrupt every transfer in flight. This page holds nothing, so it is the
+         one that takes the redirect. Same reason openpdfedit gives sign-in its own
+         window rather than putting it in the editor. */
+      body.login {
+        min-height: 100vh;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-6);
+        padding: var(--space-5);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        text-decoration: none;
+        color: var(--text-strong);
+        font: var(--weight-medium) var(--text-lg) / 1 var(--font-display);
+        letter-spacing: var(--logo-tracking);
+      }
+      .brand img {
+        width: 26px;
+        height: 26px;
+        border-radius: 6px;
+        display: block;
+      }
+      #login-slot {
+        width: 100%;
+        max-width: 420px;
+      }
+      .back {
+        color: var(--text-muted);
+        font-size: var(--text-sm);
+        text-decoration: none;
+      }
+      .back:hover {
+        color: var(--text-strong);
+      }
+    </style>
+  </head>
+  <body class="login">
+    <a class="brand" href="./">
+      <img src="./favicon.svg" alt="" />
+      <span>OpenDownloader<span style="color: var(--accent)">.</span></span>
+    </a>
+
+    <div id="login-slot"></div>
+
+    <a class="back" href="./">← Back without signing in</a>
+
+    <script type="module" src="./src/login.ts"></script>
+  </body>
+</html>

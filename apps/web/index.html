@@ -132,6 +132,24 @@
       #manager > * + * {
         margin-top: var(--space-3);
       }
+      /* The one control on this page that starts a sign-in. It is a link, not a
+         button, because it navigates — and it navigates because the redirect must not
+         happen on the page holding the download queue. */
+      .btn-signin {
+        display: inline-flex;
+        align-items: center;
+        min-height: 36px;
+        padding: 0 var(--space-5);
+        border-radius: var(--radius-md);
+        background: var(--accent);
+        color: var(--black);
+        text-decoration: none;
+        font: var(--weight-medium) var(--text-sm) / 1 var(--font-sans);
+      }
+      .btn-signin:hover {
+        background: color-mix(in oklab, var(--accent) 88%, var(--black));
+        color: var(--black);
+      }
       #tools > * + * {
         margin-top: var(--space-2);
       }

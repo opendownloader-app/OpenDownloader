@@ -51,23 +51,23 @@ export async function mountAccountPanel(
 ): Promise<void> {
   if (!root) return;
 
-  // `variant="panel"` to match openpixels and openpdfedit, which both render this as a
-  // titled card rather than three bare buttons.
+  // No `<openapps-login>` on this page, deliberately.
   //
-  // The panel is also the only variant that renders `heading` and `description`, and
-  // their defaults are "Sign in to OpenApps" / "One account for every app in the
-  // suite" — right for the platform's own pages, wrong here, where the visitor has
-  // never heard of OpenApps and is deciding whether to trust a sign-in. `mark` is the
-  // letter in the panel's tile and defaults to "O" for the same reason.
+  // Its Google button navigates the whole window out to accounts.google.com and back,
+  // and this page holds the download queue — a full-page navigation aborts every
+  // transfer in flight. So the buttons live on /login, which holds nothing, and this
+  // panel links to it. What stays here is everything that is safe to render beside a
+  // running download: the balance, the history, and a way in.
   const body = document.createElement("div");
   body.className = "stack";
   body.innerHTML = `
-    <openapps-login
-      variant="panel"
-      mark="D"
-      heading="Sign in to OpenDownloader"
-      description="One account across our apps. You do not need it here — nothing on this page is behind it."
-    ></openapps-login>
+    <p class="muted" style="margin:0">
+      Optional, and it unlocks nothing here. An account carries credits to our other
+      apps; everything on this page stays free either way.
+    </p>
+    <p style="margin:0">
+      <a class="btn-signin" href="./login?next=%2F">Sign in to OpenDownloader</a>
+    </p>
     <openapps-credits poll-seconds="30"></openapps-credits>
     <openapps-history page-size="5"></openapps-history>
   `;

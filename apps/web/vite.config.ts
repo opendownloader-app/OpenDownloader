@@ -104,6 +104,14 @@ export default defineConfig({
     },
   },
   build: {
+    // Two entry points: the app, and the sign-in page. Sign-in is a separate document
+    // on purpose — see the comment at the top of src/login.ts.
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        login: resolve(__dirname, "login.html"),
+      },
+    },
     target: "es2022",
     // The wasm is imported as a URL and fetched at runtime; never inline it as a
     // base64 data URI, which would inflate it by a third and block streaming
