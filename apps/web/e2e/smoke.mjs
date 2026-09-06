@@ -148,6 +148,24 @@ async function main() {
     const panels = await page.locator("#tools details.panel").count();
     check("the local tools mount", panels >= 4, `${panels} panels`);
 
+    // The catalogue renders from the wasm core, and its own error path *removes* the
+    // section — a courtesy that would also hide a bug in it. So assert it is there, and
+    // that both halves of it are: the websites, and the link kinds beside them.
+    await page.waitForSelector("#site-list .site", { timeout: 5000 }).catch(() => {});
+    const chips = await page.locator("#site-list .site").allTextContents();
+    check(
+      "the supported-sites catalogue renders",
+      chips.length > 0,
+      `${chips.length} entries`,
+    );
+    check(
+      "the catalogue names the link kinds, not only the websites",
+      ["Mega", "Quark", "BitTorrent", "eD2k", "Xunlei"].every((n) =>
+        chips.some((c) => c.startsWith(n)),
+      ),
+      chips.join(", "),
+    );
+
     // ---- a pasted link downloads and verifies -----------------------------
     const size = 128 * 1024;
     const expected = (await (await fetch(`${mediaUrl}/fixture.sha256?size=${size}`)).text()).trim();
