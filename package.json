@@ -19,6 +19,7 @@
     "build:extension:store": "OPENDOWNLOADER_STORE_BUILD=1 npm run build -w @opendownloader/extension && OPENDOWNLOADER_STORE_BUILD=1 npm run build:firefox -w @opendownloader/extension",
     "verify:sites": "node scripts/verify-sites.mjs",
     "verify:sites:full": "node scripts/verify-sites.mjs --full",
-    "start": "bash scripts/run-local.sh"
+    "start": "bash scripts/run-local.sh",
+    "edge": "bash scripts/run-edge.sh"
   }
 }

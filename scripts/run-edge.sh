@@ -1,51 +1,48 @@
 #!/usr/bin/env bash
-# Open Microsoft Edge with this extension already loaded, for testing.
+# Load this build into *your* Microsoft Edge — the one you actually browse with.
 #
-# Edge keeps a separate profile for this, under ~/.opendownloader-edge-profile, so
-# nothing here touches the Edge profile you browse with — no history, no logins, no
-# risk of leaving a development extension behind in your everyday browser.
+# It used to open a throwaway profile instead. That was safer in the abstract and wrong
+# in practice: the sites this extension exists for are the ones you have to be signed
+# into, and a clean profile is signed into nothing. Worse, the two browsers drift — a
+# rebuild lands in the dev profile and the everyday one keeps running yesterday's code,
+# which looks exactly like a bug in the extension.
 #
-# To put it in your *normal* Edge profile instead, see the three steps this prints.
+# An unpacked extension does not pick up new code on its own. Edge reads it once, when
+# the extension is loaded, and never looks again. So a rebuild needs the extension
+# reloaded, and the only ways to do that are the reload button on edge://extensions or
+# a restart of the browser. This restarts it, and asks Edge to restore the tabs.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(dirname "$HERE")"
 DIST="$REPO/apps/extension/dist"
-PROFILE="$HOME/.opendownloader-edge-profile"
-EDGE="/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+URL="${1:-}"
+# Off by default. With it, this script can reload the extension without restarting Edge
+# again — but it also lets any program on this machine drive a browser you are signed
+# into, so it is opt-in rather than something left switched on.
+DEBUG_PORT="${EDGE_DEBUG_PORT:-}"
 
-if [ ! -x "$EDGE" ]; then
-  echo "Microsoft Edge is not installed at $EDGE" >&2
-  exit 1
+[ -f "$DIST/manifest.json" ] || { echo "No build at $DIST — run: npm run build:extension" >&2; exit 1; }
+
+if ! pgrep -f "Microsoft Edge.app/Contents/MacOS/Microsoft Edge" >/dev/null; then
+  echo "Edge is not running; starting it."
+else
+  echo "Restarting Edge so it re-reads the extension from disk."
+  osascript -e 'tell application "Microsoft Edge" to quit' 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    pgrep -f "Microsoft Edge.app/Contents/MacOS/Microsoft Edge" >/dev/null || break
+    sleep 0.5
+  done
+  pgrep -f "Microsoft Edge.app/Contents/MacOS/Microsoft Edge" >/dev/null &&
+    { echo "Edge would not quit — close it yourself, then rerun." >&2; exit 1; }
 fi
 
-# Build only if the folder is missing; a stale dist is the caller's to refresh with
-# `npm run build:extension`, and rebuilding here would silently discard an E2E build.
-if [ ! -f "$DIST/manifest.json" ]; then
-  echo "No build found — running npm run build:extension"
-  (cd "$REPO" && npm run build:extension)
-fi
+ARGS=(--restore-last-session)
+[ -n "$DEBUG_PORT" ] && ARGS+=("--remote-debugging-port=$DEBUG_PORT")
+[ -n "$URL" ] && ARGS+=("$URL")
 
-mkdir -p "$PROFILE"
-
-cat <<TXT
-
-Opening Edge with OpenDownloader loaded.
-  extension   $DIST
-  profile     $PROFILE   (separate from your everyday Edge profile)
-
-To add it to your everyday Edge profile instead:
-  1. Go to  edge://extensions
-  2. Turn on "Developer mode" (bottom-left)
-  3. Click "Load unpacked" and choose:
-     $DIST
-
-TXT
-
-exec "$EDGE" \
-  --user-data-dir="$PROFILE" \
-  --disable-extensions-except="$DIST" \
-  --load-extension="$DIST" \
-  --no-first-run \
-  --no-default-browser-check \
-  "http://127.0.0.1:5181/page.html"
+open -na "Microsoft Edge" --args "${ARGS[@]}"
+echo "Edge restarted with the current build${DEBUG_PORT:+ (debug port $DEBUG_PORT)}."
+echo
+echo "If OpenDownloader is not listed at edge://extensions, add it once:"
+echo "  Developer mode -> Load unpacked -> $DIST"

@@ -42,8 +42,8 @@ use super::bilibili::{
     meta_content,
 };
 use super::{
-    host_is, safe_filename, Extraction, Extractor, MediaOption, Need, SiteError, Step, Stream,
-    StreamKind, VideoChoice,
+    host_is, safe_filename, AudioChoice, Extraction, Extractor, MediaOption, Need, SiteError, Step,
+    Stream, StreamKind, VideoChoice,
 };
 use serde_json::Value;
 
@@ -180,6 +180,16 @@ pub fn parse_post_page(
         }
         fresh
     });
+
+    // No muxed file named. Facebook may still describe the video as DASH — separate
+    // video and audio renditions — which is a whole answer once the two are joined, and
+    // is what the player itself is using. Tried before giving up, because giving up here
+    // reads as "this post has no video" on a post that plainly does.
+    if candidates.is_empty() && site == FACEBOOK {
+        if let Some(extraction) = facebook_dash_extraction(html, site, referer) {
+            return Ok(extraction);
+        }
+    }
 
     if candidates.is_empty() {
         return Err(login_wall(site, html));
@@ -360,6 +370,180 @@ fn facebook_candidates(html: &str) -> Vec<Candidate> {
     out
 }
 
+/// Build an extraction from Facebook's DASH renditions.
+///
+/// Each video rendition is offered joined to the best audio, so choosing one gives a file
+/// with sound rather than a silent video — these streams carry one track each, unlike the
+/// muxed keys above.
+fn facebook_dash_extraction(html: &str, site: &'static str, referer: &str) -> Option<Extraction> {
+    let reps = facebook_dash_reps(html);
+    let header = vec![("Referer".to_string(), referer.to_string())];
+    let stream_of = |r: &Rep| Stream {
+        url: r.url.clone(),
+        kind: if r.mime.starts_with("audio/") {
+            StreamKind::AudioOnly
+        } else {
+            StreamKind::VideoOnly
+        },
+        mime: Some(r.mime.clone()),
+        size: None,
+        headers: header.clone(),
+        max_chunk: None,
+    };
+
+    let mut video: Vec<&Rep> = reps
+        .iter()
+        .filter(|r| r.mime.starts_with("video/"))
+        .collect();
+    if video.is_empty() {
+        return None;
+    }
+    // Best first, by pixels then by bitrate — the order the picker shows.
+    video.sort_by_key(|r| {
+        std::cmp::Reverse((
+            r.height.unwrap_or(0) as u64 * r.width.unwrap_or(0) as u64,
+            r.bandwidth.unwrap_or(0),
+        ))
+    });
+    let audio = reps
+        .iter()
+        .filter(|r| r.mime.starts_with("audio/"))
+        .max_by_key(|r| r.bandwidth.unwrap_or(0));
+
+    let title = post_title(html, site);
+    let mut options = Vec::new();
+    let mut videos = Vec::new();
+    for (index, r) in video.iter().enumerate() {
+        let mut streams = vec![stream_of(r)];
+        if let Some(a) = audio {
+            streams.push(stream_of(a));
+        }
+        let label = match r.height {
+            Some(h) => format!("{h}p"),
+            None => "Video".to_string(),
+        };
+        videos.push(VideoChoice {
+            id: format!("d{index}"),
+            label: label.clone(),
+            width: r.width,
+            height: r.height,
+            fps: None,
+            bitrate: r.bandwidth,
+            codec: r.codecs.clone(),
+            size: None,
+            stream: stream_of(r),
+            // A DASH video rendition is picture only; the sound is the separate track.
+            has_audio: false,
+            best: false,
+            container: None,
+            mergeable: false,
+        });
+        options.push(MediaOption {
+            label,
+            // Height is the rank, so the picker orders by what a person is choosing.
+            rank: r.height.unwrap_or(0) as u64,
+            streams,
+            filename: safe_filename(&title, "mp4"),
+            width: r.width,
+            height: r.height,
+            duration_ms: None,
+        });
+    }
+
+    let audios = audio
+        .map(|a| {
+            vec![AudioChoice {
+                id: "da0".to_string(),
+                label: match a.bandwidth {
+                    Some(b) => format!("{} kbps", b / 1000),
+                    None => "Audio".to_string(),
+                },
+                bitrate: a.bandwidth,
+                codec: a.codecs.clone(),
+                language: None,
+                size: None,
+                stream: stream_of(a),
+                best: false,
+                container: None,
+                mergeable: false,
+            }]
+        })
+        .unwrap_or_default();
+
+    let mut extraction = Extraction {
+        site: site.to_string(),
+        title,
+        options,
+        videos,
+        audios,
+        subtitles: Vec::new(),
+    };
+    extraction.rank_choices();
+    Some(extraction)
+}
+
+/// One DASH rendition from Facebook's own player description.
+#[derive(Debug, Clone)]
+struct Rep {
+    url: String,
+    mime: String,
+    codecs: Option<String>,
+    width: Option<u32>,
+    height: Option<u32>,
+    bandwidth: Option<u64>,
+}
+
+/// Facebook's DASH renditions, when the muxed keys are absent.
+///
+/// The `browser_native_*` and `playable_url*` keys are a single file carrying both
+/// tracks, and they are the easy case — but Facebook does not always emit them. What it
+/// always emits, because the player cannot run without it, is a `representations` array:
+/// one entry per rendition, video and audio separately, each with a direct `.mp4`
+/// `base_url`. Reading it is the difference between "this post states no video" and a
+/// download, on exactly the posts where the muxed keys are missing.
+///
+/// Only the first array is read. A Facebook page routinely describes several videos —
+/// the one asked for, then whatever the feed suggests underneath — and the first belongs
+/// to the post at the top, which is the one the URL names. This is the same rule the
+/// muxed keys follow by taking the first match.
+///
+/// Every numeric field arrives as a JSON *string*, which is why each is parsed rather
+/// than read as a number.
+fn facebook_dash_reps(html: &str) -> Vec<Rep> {
+    let Some(text) = json_array_after(html, "\"representations\":") else {
+        return Vec::new();
+    };
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(text) else {
+        return Vec::new();
+    };
+    let num = |v: &Value, key: &str| -> Option<u64> {
+        let raw = v.get(key)?;
+        raw.as_u64()
+            .or_else(|| raw.as_str().and_then(|s| s.parse().ok()))
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let url = item.get("base_url")?.as_str()?.to_string();
+            if !url.starts_with("http") {
+                return None;
+            }
+            let mime = item.get("mime_type")?.as_str()?.to_string();
+            Some(Rep {
+                url,
+                codecs: item
+                    .get("codecs")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                width: num(item, "width").filter(|n| *n > 0).map(|n| n as u32),
+                height: num(item, "height").filter(|n| *n > 0).map(|n| n as u32),
+                bandwidth: num(item, "bandwidth"),
+                mime,
+            })
+        })
+        .collect()
+}
+
 /// `og:video`, in either of the two spellings both sites emit.
 fn og_video(html: &str) -> Option<String> {
     ["og:video:secure_url", "og:video", "og:video:url"]
@@ -427,6 +611,62 @@ mod tests {
             Step::Done(x) => x,
             other => panic!("expected Done, got {other:?}"),
         }
+    }
+
+    /// A Facebook page that names no muxed file, only DASH renditions.
+    ///
+    /// This is the shape that used to be reported as "this post states no video" on a
+    /// post that plainly had one. Numbers are strings here because that is how Facebook
+    /// emits them.
+    const FB_DASH: &str = r#"<html><head><title>Reel</title></head><body><script>
+{"representations":[
+{"representation_id":"1v","mime_type":"video/mp4","codecs":"avc1.4d001e","base_url":"https://video.xx.fbcdn.test/v/360.mp4","bandwidth":"561916","width":"360","height":"640"},
+{"representation_id":"2v","mime_type":"video/mp4","codecs":"avc1.64001f","base_url":"https://video.xx.fbcdn.test/v/720.mp4","bandwidth":"2645479","width":"720","height":"1280"},
+{"representation_id":"3a","mime_type":"audio/mp4","codecs":"mp4a.40.5","base_url":"https://video.xx.fbcdn.test/v/audio.mp4","bandwidth":"64860","width":"0","height":"0"}]}
+</script></body></html>"#;
+
+    #[test]
+    fn a_facebook_post_with_only_dash_renditions_still_extracts() {
+        let x = extract(FB_DASH, "https://www.facebook.com/reel/1753493462584492");
+        assert_eq!(x.site, "Facebook");
+
+        // Best first, and every option carries its own sound: a DASH video rendition is
+        // picture only, so an option of one stream would download a silent file.
+        let labels: Vec<&str> = x.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, ["1280p", "640p"], "ordered by height, best first");
+        for option in &x.options {
+            assert_eq!(option.streams.len(), 2, "{} must carry audio", option.label);
+            assert_eq!(option.streams[0].kind, StreamKind::VideoOnly);
+            assert_eq!(option.streams[1].kind, StreamKind::AudioOnly);
+            assert!(option.streams[1].url.ends_with("audio.mp4"));
+        }
+        assert_eq!(
+            x.options[0].streams[0].url,
+            "https://video.xx.fbcdn.test/v/720.mp4"
+        );
+        assert_eq!(x.options[0].height, Some(1280));
+
+        // The audio track is offered on its own too, so "just the sound" works here.
+        assert_eq!(x.audios.len(), 1);
+        assert_eq!(x.audios[0].bitrate, Some(64860));
+        // Zero width and height on the audio entry are Facebook's placeholders, not sizes.
+        assert!(
+            x.videos.iter().all(|v| !v.has_audio),
+            "DASH video has no sound of its own"
+        );
+    }
+
+    /// The muxed keys still win when Facebook emits them: they need no joining.
+    #[test]
+    fn the_muxed_keys_are_preferred_over_dash() {
+        let both = FB_DASH.replace(
+            "{\"representations\"",
+            "{\"browser_native_hd_url\":\"https://video.xx.fbcdn.test/v/muxed.mp4\",\"representations\"",
+        );
+        let x = extract(&both, "https://www.facebook.com/watch/?v=1");
+        assert_eq!(x.options.len(), 1, "one muxed answer, not the DASH ladder");
+        assert_eq!(x.options[0].streams.len(), 1);
+        assert!(x.options[0].streams[0].url.ends_with("muxed.mp4"));
     }
 
     #[test]
