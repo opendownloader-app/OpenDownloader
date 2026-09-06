@@ -87,6 +87,15 @@ export interface Job {
    * produces the SHA-256 every other job is described by.
    */
   expectedEd2k?: string | null;
+  /**
+   * Decrypt each chunk on its way to disk.
+   *
+   * Only AES-CTR, and only because that is what makes it possible at all: CTR is a
+   * stream cipher keyed by block index, so a chunk at any offset decrypts without the
+   * ones before it. A mode that chained blocks would force a single sequential pass and
+   * take resume and parallel chunks with it.
+   */
+  decrypt?: { key: string; nonce: string } | null;
   /** The eD2k hash of the finished file, computed only when one was expected. */
   ed2k?: string | null;
   verification?: Verification;

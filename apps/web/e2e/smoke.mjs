@@ -252,6 +252,63 @@ async function main() {
       bundleLeak ? `${bundleLeak} bundle(s) contain accounts.openapps.network` : "",
     );
 
+    // Encrypted downloads: the counter arithmetic, in the browser's own WebCrypto.
+    //
+    // This is the part of Mega support most likely to be silently wrong, and wrong here
+    // does not throw — it writes plausible-looking noise to disk and reports success.
+    // The cases below are the ones a real download produces: chunk boundaries, offsets
+    // that do not land on an AES block (a resumed range), and ranges arriving out of
+    // order from parallel connections.
+    const ctr = await page.evaluate(async () => {
+      const fill = (n) => {
+        const a = new Uint8Array(n);
+        for (let i = 0; i < n; i += 65536)
+          crypto.getRandomValues(a.subarray(i, Math.min(i + 65536, n)));
+        return a;
+      };
+      const keyRaw = fill(16), nonce = fill(8), plain = fill(200_000);
+      const counter0 = new Uint8Array(16);
+      counter0.set(nonce, 0);
+      const encKey = await crypto.subtle.importKey("raw", keyRaw, "AES-CTR", false, ["encrypt"]);
+      const cipher = new Uint8Array(await crypto.subtle.encrypt(
+        { name: "AES-CTR", counter: counter0, length: 64 }, encKey, plain));
+
+      const key = await crypto.subtle.importKey("raw", keyRaw, "AES-CTR", false, ["decrypt"]);
+      const decrypt = async (offset, bytes) => {
+        const counter = new Uint8Array(16);
+        counter.set(nonce, 0);
+        let block = BigInt(Math.floor(offset / 16));
+        for (let i = 15; i >= 8; i--) { counter[i] = Number(block & 0xffn); block >>= 8n; }
+        const skip = offset % 16;
+        let input = bytes;
+        if (skip !== 0) { input = new Uint8Array(skip + bytes.length); input.set(bytes, skip); }
+        const out = new Uint8Array(
+          await crypto.subtle.decrypt({ name: "AES-CTR", counter, length: 64 }, key, input));
+        return skip === 0 ? out : out.subarray(skip);
+      };
+      const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+      const run = async (step, shuffle) => {
+        const offsets = [];
+        for (let o = 0; o < cipher.length; o += step) offsets.push(o);
+        if (shuffle) offsets.sort(() => Math.random() - 0.5);
+        const out = new Uint8Array(plain.length);
+        for (const o of offsets)
+          out.set(await decrypt(o, cipher.subarray(o, Math.min(o + step, cipher.length))), o);
+        return same(out, plain);
+      };
+      return {
+        aligned: await run(65536, false),
+        unaligned: await run(1000, false),
+        outOfOrder: await run(4096, true),
+      };
+    });
+    check(
+      "encrypted chunks decrypt at any offset and in any order",
+      ctr.aligned && ctr.unaligned && ctr.outOfOrder,
+      JSON.stringify(ctr),
+    );
+
     check("no uncaught page errors", pageErrors.length === 0, pageErrors.join("; "));
   } finally {
     await browser.close();

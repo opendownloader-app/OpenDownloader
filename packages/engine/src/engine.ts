@@ -145,6 +145,61 @@ async function probe(url: string, signal?: AbortSignal): Promise<ProbeResult> {
   };
 }
 
+/**
+ * A chunk decryptor, or `null` when the job is plain bytes.
+ *
+ * Built once per job rather than per chunk: importing a key is not free and a large
+ * download does this thousands of times.
+ */
+async function decryptorFor(
+  job: Job,
+): Promise<
+  | ((offset: number, bytes: Uint8Array<ArrayBuffer>) => Promise<Uint8Array>)
+  | null
+> {
+  if (!job.decrypt) return null;
+  const raw = Uint8Array.from(atob(job.decrypt.key), (c) => c.charCodeAt(0));
+  const nonce = Uint8Array.from(atob(job.decrypt.nonce), (c) =>
+    c.charCodeAt(0),
+  );
+  const key = await crypto.subtle.importKey("raw", raw, "AES-CTR", false, [
+    "decrypt",
+  ]);
+
+  return async (offset, bytes) => {
+    // The counter block is the 8-byte nonce followed by the block index, big-endian.
+    const counter = new Uint8Array(16);
+    counter.set(nonce, 0);
+    // The block index, big-endian, written by hand: a DataView over a Uint8Array's
+    // buffer is typed as possibly shared, and the loop states the byte order plainly
+    // anyway — which is the part worth being unambiguous about.
+    let block = BigInt(Math.floor(offset / 16));
+    for (let i = 15; i >= 8; i--) {
+      counter[i] = Number(block & 0xffn);
+      block >>= 8n;
+    }
+
+    // An offset that does not land on a block boundary would put the keystream out of
+    // step. Pad to the boundary, decrypt, then drop the padding: CTR is a stream cipher,
+    // so decrypting bytes we then discard costs nothing but alignment.
+    const skip = offset % 16;
+    let input: Uint8Array<ArrayBuffer> = bytes;
+    if (skip !== 0) {
+      input = new Uint8Array(skip + bytes.length);
+      input.set(bytes, skip);
+    }
+
+    const out = new Uint8Array(
+      await crypto.subtle.decrypt(
+        { name: "AES-CTR", counter, length: 64 },
+        key,
+        input,
+      ),
+    );
+    return skip === 0 ? out : out.subarray(skip);
+  };
+}
+
 /** Run a progressive (single-resource) download to completion. */
 async function runProgressive(
   job: Job,
@@ -154,6 +209,7 @@ async function runProgressive(
   connections: number,
 ): Promise<{ session: Session; total: number | null }> {
   const info = await probe(job.url, opts.signal);
+  const decryptChunk = await decryptorFor(job);
 
   // Resume only if we have prior state *and* the server still supports ranges.
   // Restoring a range-based plan against a server that has stopped honouring
@@ -230,8 +286,11 @@ async function runProgressive(
           );
         }
 
-        const bytes = new Uint8Array(await res.arrayBuffer());
-        if (bytes.length === 0) return;
+        const raw = new Uint8Array(await res.arrayBuffer());
+        if (raw.length === 0) return;
+        // Decrypt before the sink, so what lands on disk is the plaintext and the
+        // read-back digest describes the file the user actually has.
+        const bytes = decryptChunk ? await decryptChunk(r.start, raw) : raw;
         await sink.write(r.start, bytes);
         session.record(BigInt(r.start), BigInt(r.start + bytes.length - 1));
       }),

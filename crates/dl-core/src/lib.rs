@@ -15,6 +15,7 @@ pub mod ed2k;
 pub mod hls;
 pub mod integrity;
 pub mod links;
+pub mod mega;
 pub mod plan;
 pub mod policy;
 pub mod session;

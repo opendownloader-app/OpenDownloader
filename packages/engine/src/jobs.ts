@@ -67,6 +67,7 @@ export interface EnqueueOptions {
   audioOnly?: boolean;
   expectedSha256?: string | null;
   expectedEd2k?: string | null;
+  decrypt?: { key: string; nonce: string } | null;
 }
 
 /** Create a job from a candidate, or return the existing one. */
@@ -109,6 +110,7 @@ export async function enqueueCandidate(
     audioOnly: opts.audioOnly ?? false,
     expectedSha256: opts.expectedSha256 ?? null,
     expectedEd2k: opts.expectedEd2k ?? null,
+    decrypt: opts.decrypt ?? null,
     verification: "unverified",
   };
   await putJob(job);
