@@ -24,11 +24,51 @@
         margin: 0 auto;
         padding: var(--space-10) var(--space-5) var(--space-20);
       }
+      /* Brand left, account right — the shape every app in the suite uses. */
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        margin-bottom: var(--space-8);
+      }
       .brand {
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        margin-bottom: var(--space-4);
+        text-decoration: none;
+        color: var(--text-strong);
+        font: var(--weight-medium) var(--text-base) / 1 var(--font-display);
+        letter-spacing: var(--logo-tracking);
+        white-space: nowrap;
+      }
+      .brand > span {
+        display: inline;
+      }
+      .brand .dot {
+        color: var(--accent);
+      }
+      /* Round, icon-only, quiet until hovered — it is a way in, not a call to action.
+         A signed-in visitor gets the same control; only its title changes. */
+      .icon-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        flex: none;
+        border-radius: var(--radius-full, 999px);
+        color: var(--text-muted);
+        text-decoration: none;
+        transition: background var(--duration-fast, 120ms)
+          var(--ease-standard, ease);
+      }
+      .icon-button:hover {
+        color: var(--text-strong);
+        background: var(--surface-hover);
+      }
+      .icon-button.signed-in {
+        color: var(--accent);
       }
       .brand img {
         width: 34px;
@@ -157,9 +197,34 @@
   </head>
   <body class="page">
     <header>
-      <div class="brand">
-        <img src="./favicon.svg" alt="" />
-        <span>OpenDownloader</span>
+      <div class="topbar">
+        <a class="brand" href="./">
+          <img src="./favicon.svg" alt="" />
+          <span>OpenDownloader<span class="dot">.</span></span>
+        </a>
+        <!-- The only account control on this page. A link, not a panel: signing in
+             navigates the window, and this page holds the download queue. -->
+        <a
+          id="account-link"
+          class="icon-button"
+          href="./login?next=%2F"
+          aria-label="Account"
+          title="Account"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+          >
+            <circle cx="12" cy="8" r="3.6" />
+            <path d="M4.8 20a7.2 7.2 0 0 1 14.4 0" />
+          </svg>
+        </a>
       </div>
       <h1>Save a video from a web page to your computer</h1>
       <p class="lead">
@@ -232,11 +297,6 @@
           </p>
         </div>
       </div>
-    </section>
-
-    <section id="account">
-      <h2>Account</h2>
-      <div id="account-panel"></div>
     </section>
 
     <section>

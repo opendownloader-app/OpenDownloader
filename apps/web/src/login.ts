@@ -61,10 +61,16 @@ async function main(): Promise<void> {
     location.replace(returnTarget());
   });
 
-  // Returning from the Google redirect: the element completes it during its own load, so
-  // give it a moment and then look, rather than racing it.
-  const client = mod.getClient?.();
-  if (client?.isLoggedIn) location.replace(returnTarget());
+  // Deliberately no "already signed in, bounce them away" check. This page is also the
+  // account view — the element renders a signed-in state of its own — and redirecting on
+  // load would make that view unreachable for exactly the people it is for. The Google
+  // return is covered by the event above, which the element emits once it has exchanged
+  // the code.
+  const credits = document.createElement("openapps-credits");
+  credits.setAttribute("poll-seconds", "30");
+  const history = document.createElement("openapps-history");
+  history.setAttribute("page-size", "5");
+  slot.append(credits, history);
 }
 
 void main().catch((e) => {

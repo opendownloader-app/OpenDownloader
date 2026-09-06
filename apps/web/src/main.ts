@@ -36,7 +36,7 @@ import {
 } from "@opendownloader/engine";
 import { Manager, candidateForUrl, mountTools } from "@opendownloader/ui";
 
-import { mountAccountPanel } from "./account";
+import { reflectAccountState } from "./account";
 import { mountTranscribePanel } from "./transcribe-panel";
 
 // Test-only engine configuration, applied before anything can start a download.
@@ -343,9 +343,9 @@ let relayAdopted = false;
 
 void adoptLocalRelay();
 void adoptTorrentBridge();
-// Additive and lazy: the panel loads its own bundle, and the page is fully usable
-// before and without it.
-void mountAccountPanel(document.getElementById("account-panel"));
+// Only a hint on the header control. Lazy, failure-tolerant, and never on the path
+// of anything the page actually does.
+void reflectAccountState(document.getElementById("account-link"));
 
 const manager = new Manager({
   root: document.getElementById("manager") as HTMLElement,
