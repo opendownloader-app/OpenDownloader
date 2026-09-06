@@ -8,6 +8,7 @@ import { enqueueCandidate, formatSize, type DetectedItem } from "@opendownloader
 
 import { ext, openManagerTab } from "../platform/webext";
 import type { PopupResponse } from "../shared/messages";
+import { initQuarkPanel } from "./quark";
 import { initSitePanel } from "./site";
 
 const listEl = document.getElementById("list") as HTMLDivElement;
@@ -138,7 +139,9 @@ async function refresh(): Promise<void> {
 
   // Offered independently of the permission gate below, because on a supported site the
   // extractor is the better answer and its own button explains what it needs.
-  await initSitePanel(tab);
+  // Quark first: it has no extractor, so the site panel would not claim it, and it is
+  // the one source that has to run its requests inside the tab to see the user's session.
+  if (!(await initQuarkPanel(tab))) await initSitePanel(tab);
 
   const pattern = originPattern(tab.url);
   if (pattern) {

@@ -7,9 +7,14 @@
 // It stops there, deliberately. Turning a file id into a download URL is Quark's third
 // step, and that one refuses a caller with no session: `code 23018`, measured against
 // files of 155 MB, 605 MB and 61 GB in the same share, so it is the missing account and
-// not the size of any one file. What lifts it is signing in to Quark, and the speed that
-// follows is the one the account is entitled to. There is no version of this module that
-// gets around that, and none is wanted.
+// not the size of any one file.
+//
+// Signing in does not lift it *here*, and that is worth being exact about. These requests
+// go through the relay, which is a separate program holding none of the browser's
+// cookies, so the user's Quark session is never part of them however signed in they are.
+// The extension is where that works: on the share's own page it runs the same calls
+// inside the tab, where the origin is Quark's own and the session cookies travel with the
+// request. This module lists; the extension fetches.
 //
 // Every call here goes through the relay. Quark's API allows exactly one origin, its own,
 // and answers `403` to any other — including the preflight, which is why no header a page
@@ -60,10 +65,13 @@ export async function isQuarkShare(url: string): Promise<boolean> {
 export class QuarkNeedsAccount extends Error {
   constructor(readonly filename: string) {
     super(
-      `Quark will not release "${filename}" to a visitor who is not signed in — it ` +
-        `answers the download request with a size limit whatever the file's size. ` +
-        `Opening the share in a browser where you are signed in to Quark, and saving ` +
-        `the file from there, is the way to get it at the speed your account allows.`,
+      `Quark will not release "${filename}" here. It answers this request with a size ` +
+        `limit whatever the file's size, which is what it says to a caller it does not ` +
+        `recognise as signed in — and signing in will not change it on this page. The ` +
+        `request goes out through the relay, a separate program on your machine that ` +
+        `holds none of your cookies, so your Quark session is never part of it. The ` +
+        `browser extension can do this: on the share's own page it runs the request ` +
+        `inside that tab, where you are already signed in.`,
     );
     this.name = "QuarkNeedsAccount";
   }

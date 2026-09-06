@@ -407,8 +407,9 @@ function renderQuarkEntries(
   const note = document.createElement("p");
   note.className = "muted hint";
   note.textContent =
-    "Quark lets anyone read a share, but hands over the files only to an account it " +
-    "recognises \u2014 so a file here may answer with a refusal rather than a download.";
+    "Quark lets anyone read a share, but hands over files only to an account it " +
+    "recognises \u2014 and it cannot see your Quark sign-in from this page. Use the " +
+    "browser extension on the share's own page for the download itself.";
   siteOptionsEl.append(note);
 }
 
