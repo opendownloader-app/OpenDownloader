@@ -36,6 +36,14 @@
         font: var(--weight-medium) var(--text-lg) / 1 var(--font-display);
         letter-spacing: var(--logo-tracking);
       }
+      /* The suite wordmark is two-tone: the shared "Open" recedes so the product's own
+         name carries the mark, then a full stop in the product accent. */
+      .brand .prefix {
+        color: var(--text-muted);
+      }
+      .brand .dot {
+        color: var(--accent);
+      }
       .brand img {
         width: 26px;
         height: 26px;
@@ -59,7 +67,11 @@
   <body class="account">
     <a class="brand" href="./">
       <img src="./favicon.svg" alt="" />
-      <span>OpenDownloader<span style="color: var(--accent)">.</span></span>
+      <span
+        ><span class="prefix">Open</span>Downloader<span class="dot"
+          >.</span
+        ></span
+      >
     </a>
 
     <div id="account-slot"></div>

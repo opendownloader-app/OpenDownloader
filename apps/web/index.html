@@ -45,6 +45,12 @@
       .brand > span {
         display: inline;
       }
+      /* The suite wordmark is two-tone: the shared "Open" recedes so the product's own
+         name carries the mark, then a full stop in the product accent. Flat, it reads as
+         a different family from opencapture.app and openpdfedit.com. */
+      .brand .prefix {
+        color: var(--text-muted);
+      }
       .brand .dot {
         color: var(--accent);
       }
@@ -200,7 +206,11 @@
       <div class="topbar">
         <a class="brand" href="./">
           <img src="./favicon.svg" alt="" />
-          <span>OpenDownloader<span class="dot">.</span></span>
+          <span
+            ><span class="prefix">Open</span>Downloader<span class="dot"
+              >.</span
+            ></span
+          >
         </a>
         <!-- The only account control on this page. A link, not a panel: signing in
              navigates the window, and this page holds the download queue. -->
