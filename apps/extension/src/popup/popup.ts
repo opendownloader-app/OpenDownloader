@@ -10,7 +10,9 @@ import {
   jobIdFor,
   mediaHostPatterns,
   putJob,
+  resolveVimeoManifest,
   trackKind,
+  vimeoStreams,
   type DetectedItem,
   type ExtractedStream,
 } from "@opendownloader/engine";
@@ -101,6 +103,86 @@ async function findJoinablePair(
   const video = newest("video");
   const audio = newest("audio");
   return video && audio ? { video, audio } : null;
+}
+
+/**
+ * A Vimeo manifest, rendered as the page's one answer.
+ *
+ * The renditions are not known until the manifest is fetched, and its address is signed
+ * and short-lived — so it is fetched on the click rather than to draw this row, and an
+ * expired address is reported as what it is rather than as an empty picker.
+ */
+function manifestCard(item: DetectedItem): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "card item stack";
+
+  const title = document.createElement("div");
+  title.className = "row";
+  const name = document.createElement("div");
+  name.className = "grow truncate";
+  name.textContent = pageTitle ?? "This video";
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.textContent = "video";
+  title.append(name, badge);
+
+  const meta = document.createElement("div");
+  meta.className = "muted";
+  meta.textContent =
+    "Vimeo streams this as separate picture and sound; both are downloaded and joined.";
+
+  const action = document.createElement("button");
+  action.className = "primary";
+  action.textContent = "Download";
+  action.addEventListener("click", () => {
+    action.disabled = true;
+    action.textContent = "Reading the stream\u2026";
+    void queueVimeo(item, meta, action);
+  });
+
+  card.append(title, meta, action);
+  return card;
+}
+
+/** Resolve the manifest and queue its best rendition joined to its best audio. */
+async function queueVimeo(
+  item: DetectedItem,
+  meta: HTMLElement,
+  action: HTMLButtonElement,
+): Promise<void> {
+  try {
+    const manifest = await resolveVimeoManifest(item.url);
+    const chosen = await vimeoStreams(manifest, 0);
+    if (!chosen)
+      throw new Error("That Vimeo stream names no video and audio to join.");
+
+    const now = Date.now();
+    await putJob({
+      id: jobIdFor(`${manifest.clip_id}|${chosen.label}`),
+      url: item.pageUrl ?? item.url,
+      filename: safeFilename(pageTitle ?? undefined) ?? "video.mp4",
+      kind: "merge",
+      status: "queued",
+      stateJson: "",
+      totalBytes: (chosen.video.size ?? 0) + (chosen.audio.size ?? 0),
+      receivedBytes: 0,
+      outputBytes: 0,
+      sha256: null,
+      error: null,
+      createdAt: now,
+      order: now,
+      pageUrl: item.pageUrl,
+      site: "Vimeo",
+      mergeStreams: [chosen.video, chosen.audio],
+    });
+    await openManagerTab();
+    window.close();
+  } catch (e) {
+    meta.className = "status-error";
+    meta.textContent = e instanceof Error ? e.message : String(e);
+    action.disabled = false;
+    action.textContent = "Download";
+  }
 }
 
 /** The joined pair, rendered as the page's one answer. */
@@ -219,18 +301,25 @@ async function renderCandidates(items: DetectedItem[]): Promise<void> {
   // one thing on offer. The tracks it is made of, and whatever else the page fetched,
   // go under a fold — listing them alongside turns one obvious choice into eight
   // similar-looking rows, which is how someone ends up downloading half a video.
-  const pair = await findJoinablePair(items);
-  const rest = pair
-    ? items.filter((i) => i !== pair.video && i !== pair.audio)
-    : items;
+  // A Vimeo manifest is one entry describing every rendition, so it answers the page on
+  // its own and outranks any pairing guess: the two tracks it names are stated to belong
+  // together rather than inferred from arrival order.
+  const manifest = items.find((i) => i.kind === "vimeoadaptive");
+  const pair = manifest ? null : await findJoinablePair(items);
+  const rest = manifest
+    ? items.filter((i) => i !== manifest)
+    : pair
+      ? items.filter((i) => i !== pair.video && i !== pair.audio)
+      : items;
 
-  if (pair) listEl.append(joinedCard(pair));
+  if (manifest) listEl.append(manifestCard(manifest));
+  else if (pair) listEl.append(joinedCard(pair));
 
   // The batch bar acts on the individual files, so it is only useful when they are the
   // thing being chosen from.
-  batchEl.hidden = pair !== null || rest.length < 2;
+  batchEl.hidden = manifest !== undefined || pair !== null || rest.length < 2;
 
-  const host = pair ? foldFor(rest.length) : listEl;
+  const host = manifest || pair ? foldFor(rest.length) : listEl;
   for (const item of rest) {
     const card = document.createElement("div");
     card.className = "card item stack";

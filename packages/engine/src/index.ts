@@ -18,6 +18,7 @@ export * from "./local-tools";
 export * from "./extract";
 export * from "./mega";
 export * from "./quark";
+export * from "./vimeo-adaptive";
 export { mergeSize, runMerge, type MergeOptions } from "./merge";
 export {
   PausedError,

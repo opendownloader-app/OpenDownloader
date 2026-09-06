@@ -77,7 +77,14 @@ async function readRange(
   const pieces: Uint8Array[] = [];
   for (let offset = 0; offset < length; offset += limit) {
     if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-    pieces.push(await readOnce(stream, start + offset, Math.min(limit, length - offset), signal));
+    pieces.push(
+      await readOnce(
+        stream,
+        start + offset,
+        Math.min(limit, length - offset),
+        signal,
+      ),
+    );
   }
 
   const out = new Uint8Array(pieces.reduce((sum, p) => sum + p.length, 0));
@@ -95,17 +102,112 @@ async function readOnce(
   length: number,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
+  // A segmented stream is not one resource, so there is no range to ask for: the bytes
+  // are assembled from the pieces that cover the span instead. The merger cannot tell
+  // the difference, which is the point — it asks for offsets either way.
+  if (stream.segments) {
+    return readFromSegments(stream, start, length, signal);
+  }
   const res = await fetchWithRetry(stream.url, {
-    headers: { ...headersOf(stream), Range: `bytes=${start}-${start + length - 1}` },
+    headers: {
+      ...headersOf(stream),
+      Range: `bytes=${start}-${start + length - 1}`,
+    },
     signal,
     // A host that states a request size is one that throttles, and its 403 means "slow
     // down" rather than "no".
     retryForbidden: stream.max_chunk !== null,
   });
   if (!res.ok && res.status !== 206) {
-    throw new Error(`stream answered ${res.status} for bytes ${start}-${start + length - 1}`);
+    throw new Error(
+      `stream answered ${res.status} for bytes ${start}-${start + length - 1}`,
+    );
   }
   return new Uint8Array(await res.arrayBuffer());
+}
+
+/**
+ * One fetched piece, kept so consecutive reads inside it cost one request.
+ *
+ * The merger reads a stream in order but not in segment-sized bites — it takes a box
+ * header, then a fragment, then the next — so without this a 2 MB segment is refetched
+ * for every small read inside it. One piece is enough precisely because the reads
+ * advance.
+ */
+let cached: { url: string; bytes: Uint8Array } | null = null;
+
+/** Fetch one segment whole, or return the init segment decoded from the manifest. */
+async function piece(
+  stream: ExtractedStream,
+  url: string | null,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  if (url === null) {
+    // The init segment arrives inside the manifest as base64, so it is never fetched.
+    const binary = atob(stream.initBase64 ?? "");
+    return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  }
+  if (cached?.url === url) return cached.bytes;
+  const res = await fetchWithRetry(url, {
+    headers: headersOf(stream),
+    signal,
+    retryForbidden: stream.max_chunk !== null,
+  });
+  if (!res.ok) {
+    throw new Error(`segment answered ${res.status}`);
+  }
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  cached = { url, bytes };
+  return bytes;
+}
+
+/**
+ * Serve a byte range of a segmented stream.
+ *
+ * The stream is the init segment followed by every segment in order, and the manifest
+ * states each length, so which pieces a span touches is arithmetic rather than a probe.
+ */
+async function readFromSegments(
+  stream: ExtractedStream,
+  start: number,
+  length: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  const initLength = stream.segments?.[0]?.offset ?? 0;
+  // The init segment first, then each segment at the offset the manifest laid out.
+  const pieces: { url: string | null; start: number; end: number }[] = [
+    { url: null, start: 0, end: initLength },
+    ...(stream.segments ?? []).map((s) => ({
+      url: s.url,
+      start: s.offset,
+      end: s.offset + s.size,
+    })),
+  ];
+
+  const out = new Uint8Array(length);
+  let written = 0;
+  for (const p of pieces) {
+    const from = Math.max(start, p.start);
+    const to = Math.min(start + length, p.end);
+    if (to <= from) continue;
+    const bytes = await piece(stream, p.url, signal);
+    // A segment that is not the length the manifest promised would put every later
+    // offset wrong, so it is caught here rather than producing a silently broken file.
+    if (bytes.length !== p.end - p.start) {
+      throw new Error(
+        `a segment was ${bytes.length} bytes where the manifest said ${p.end - p.start}; ` +
+          "the manifest and the media no longer agree",
+      );
+    }
+    out.set(bytes.subarray(from - p.start, to - p.start), from - start);
+    written += to - from;
+  }
+  if (written !== length) {
+    throw new Error(
+      `only ${written} of ${length} bytes are covered by this stream's segments`,
+    );
+  }
+  return out;
 }
 
 /** The top-level box types present at the front of a stream. */
@@ -156,7 +258,9 @@ function moovIn(head: Uint8Array): Uint8Array | null {
     }
     if (size < headerLen) return null;
     if (kind === "moov") {
-      return offset + size <= head.length ? head.subarray(offset, offset + size) : null;
+      return offset + size <= head.length
+        ? head.subarray(offset, offset + size)
+        : null;
     }
     offset += size;
   }
@@ -182,11 +286,17 @@ async function seekMoov(
   let offset = 0;
   for (let hop = 0; hop < 64; hop++) {
     abortIf(signal);
-    const chunk = hop === 0 ? head : await readRange(stream, offset, 64 * 1024, signal);
+    const chunk =
+      hop === 0 ? head : await readRange(stream, offset, 64 * 1024, signal);
     if (chunk.length < 8) break;
     const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
     let size = view.getUint32(0);
-    const kind = String.fromCharCode(chunk[4]!, chunk[5]!, chunk[6]!, chunk[7]!);
+    const kind = String.fromCharCode(
+      chunk[4]!,
+      chunk[5]!,
+      chunk[6]!,
+      chunk[7]!,
+    );
     let headerLen = 8;
     if (size === 1) {
       if (chunk.length < 16) break;
@@ -251,11 +361,15 @@ export async function runMerge(
   // Decided from the bytes, not from the site: a `sidx` means the file indexes its own
   // fragments, which is the fragmented shape.
   const fragmented =
-    boxTypes(videoHead).includes("sidx") && boxTypes(audioHead).includes("sidx");
+    boxTypes(videoHead).includes("sidx") &&
+    boxTypes(audioHead).includes("sidx");
 
   let merger: Merger;
   if (fragmented) {
-    merger = core.FragmentMerger.fromHeads(videoHead, audioHead) as unknown as Merger;
+    merger = core.FragmentMerger.fromHeads(
+      videoHead,
+      audioHead,
+    ) as unknown as Merger;
   } else {
     const [videoMoov, audioMoov] = await Promise.all([
       seekMoov(video, videoHead, opts.signal),
@@ -306,7 +420,11 @@ export async function runMerge(
     // Persisted for display only. A merge does not resume, so this is progress
     // reporting rather than a resume point.
     if (index % 8 === 0) {
-      await updateJob(job.id, { receivedBytes: fetched, outputBytes: written, totalBytes: total });
+      await updateJob(job.id, {
+        receivedBytes: fetched,
+        outputBytes: written,
+        totalBytes: total,
+      });
     }
   }
 
@@ -325,7 +443,10 @@ export async function runMerge(
 }
 
 /** Bytes the two streams will transfer, when both report a size. */
-export function mergeSize(video: ExtractedStream, audio: ExtractedStream): number | null {
+export function mergeSize(
+  video: ExtractedStream,
+  audio: ExtractedStream,
+): number | null {
   if (video.size === null || audio.size === null) return null;
   return video.size + audio.size;
 }

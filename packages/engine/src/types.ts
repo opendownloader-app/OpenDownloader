@@ -5,7 +5,7 @@
 // any change here needs a matching change in crates/dl-core/src/{classify,hls}.rs.
 
 /** What `dl_core::classify` decided an observed response was. */
-export type MediaKind = "progressive" | "hlsplaylist";
+export type MediaKind = "progressive" | "hlsplaylist" | "vimeoadaptive";
 
 /**
  * What the engine runs for a job.
@@ -15,7 +15,16 @@ export type MediaKind = "progressive" | "hlsplaylist";
  * combines them into one file. The platforms that need it — YouTube above 360p,
  * Bilibili's DASH — no longer offer a single file to classify.
  */
-export type JobKind = MediaKind | "merge";
+/**
+ * How a job is downloaded.
+ *
+ * Deliberately not `MediaKind | "merge"` any more. What the sniffer *sees* and how a
+ * download *runs* are different questions, and a Vimeo adaptive manifest is the case
+ * that separates them: it is a kind of thing to find, and it is downloaded by joining
+ * two of its renditions, which is a merge. Deriving one from the other would have added
+ * a job kind nothing runs.
+ */
+export type JobKind = "progressive" | "hlsplaylist" | "merge";
 
 export interface MediaCandidate {
   url: string;
@@ -216,6 +225,17 @@ export interface ExtractedStream {
   headers: [string, string][];
   /** See `Job.maxChunkBytes`. Null when the host states no limit. */
   max_chunk: number | null;
+  /**
+   * Present when this stream is a list of segments rather than one ranged file.
+   *
+   * Vimeo's adaptive renditions are an init segment followed by numbered `.m4s` files,
+   * and the manifest states each one's length. That is enough to answer a byte range by
+   * fetching only the segments it covers, so the merger reads such a stream exactly as
+   * it reads an ordinary URL and needs no knowledge of either shape.
+   */
+  segments?: { url: string; size: number; offset: number }[];
+  /** The init segment for {@link segments}, base64, as the manifest gives it. */
+  initBase64?: string;
 }
 
 /** Live progress for a running job. Kept in memory, never persisted. */

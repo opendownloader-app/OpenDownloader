@@ -15,6 +15,9 @@ import {
   configureEngine,
   deleteJob,
   enqueueCandidate,
+  putJob,
+  resolveVimeoManifest,
+  vimeoStreams,
   extract,
   extractMp4Audio,
   fetchSubtitleRendition,
@@ -83,6 +86,11 @@ if (__OPENDOWNLOADER_E2E__) {
     // tab — automation has no second tab to read, and the parsing is the part under test.
     extract,
     isSupportedSite,
+    // Vimeo's JSON adaptive path, which the popup drives from a toolbar click that
+    // automation cannot produce reliably — the button needs a focused window.
+    resolveVimeoManifest,
+    vimeoStreams,
+    putJob,
     reset: async () => {
       for (const j of await listJobs()) await deleteJob(j.id);
       await manager.start();

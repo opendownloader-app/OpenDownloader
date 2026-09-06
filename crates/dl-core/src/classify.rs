@@ -16,6 +16,11 @@ pub enum MediaKind {
     Progressive,
     /// An HLS playlist that must be parsed and expanded into segments.
     HlsPlaylist,
+    /// Vimeo's JSON adaptive manifest, which names its segments in JSON rather than in
+    /// a playlist. Kept as its own kind because nothing else can read it: it is served
+    /// as `application/json`, so every rule below would drop it, and the page holds no
+    /// other address for a video restricted to Vimeo's own site.
+    VimeoAdaptive,
 }
 
 /// Everything the sniffer knows about one observed response.
@@ -134,6 +139,28 @@ pub fn classify(meta: &RequestMeta) -> Option<MediaCandidate> {
         return None;
     }
 
+    // Vimeo's JSON manifest is recognised but deliberately not offered yet. Reading it
+    // works — the renditions, their segments and their real lengths all come out — but
+    // joining picture to sound does not: the fragment merger indexes an input from the
+    // single `sidx` at its head, which is how YouTube and Bilibili ship a rendition,
+    // while Vimeo ships twenty-one segments each carrying its own. Only the first was
+    // ever read, and the result was a 2.6 MB file out of 88 MB that no player opens.
+    //
+    // Offering it would put a Download button on a broken file. The gate comes off with
+    // the indexer that walks every segment's `sidx`, not before.
+    const VIMEO_ADAPTIVE_READY: bool = false;
+    if VIMEO_ADAPTIVE_READY && crate::sites::vimeo_adaptive::is_adaptive_playlist(&meta.url) {
+        return Some(MediaCandidate {
+            url: meta.url.clone(),
+            kind: MediaKind::VimeoAdaptive,
+            filename: "video.mp4".to_string(),
+            mime: Some("video/mp4".to_string()),
+            // The manifest states each segment's size, but the total is a property of the
+            // rendition eventually chosen, not of the manifest.
+            size: None,
+        });
+    }
+
     let mime = meta
         .content_type
         .as_deref()
@@ -237,8 +264,9 @@ fn derive_filename(
 
     let stem = url_stem(&meta.url).unwrap_or_else(|| "download".to_string());
     let wanted_ext = match kind {
-        // A playlist is not what lands on disk — an fMP4 is.
-        MediaKind::HlsPlaylist => "mp4".to_string(),
+        // A playlist is not what lands on disk — an fMP4 is. The same is true of a
+        // manifest: what is saved is the joined picture and sound.
+        MediaKind::HlsPlaylist | MediaKind::VimeoAdaptive => "mp4".to_string(),
         MediaKind::Progressive => ext
             .map(str::to_string)
             .or_else(|| mime.and_then(extension_for_mime).map(str::to_string))
@@ -572,5 +600,31 @@ mod tracks {
             "muxed"
         );
         assert_eq!(track_kind("https://cdn.test/movie.mp4", None), "muxed");
+    }
+}
+
+#[cfg(test)]
+mod vimeo_manifests {
+    use super::*;
+
+    /// A Vimeo manifest is recognised but not yet offered.
+    ///
+    /// Reading it works and is tested in `sites::vimeo_adaptive`. What does not work is
+    /// joining its picture to its sound, so putting it in the candidate list would put a
+    /// Download button on a file that no player opens. This test exists to fail loudly
+    /// when the gate is lifted without the merger being ready.
+    #[test]
+    fn a_vimeo_manifest_is_not_offered_until_it_can_be_joined() {
+        let manifest = "https://vod-adaptive-ak.vimeocdn.com/exp=1~hmac=a/clip/v2/playlist/av/primary/playlist.json?pathsig=x";
+        assert!(crate::sites::vimeo_adaptive::is_adaptive_playlist(manifest));
+        assert!(
+            classify(&RequestMeta {
+                url: manifest.to_string(),
+                content_type: Some("application/json".to_string()),
+                ..Default::default()
+            })
+            .is_none(),
+            "not offered while the merger cannot join its segments"
+        );
     }
 }

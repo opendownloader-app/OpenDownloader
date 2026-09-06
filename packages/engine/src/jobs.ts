@@ -96,7 +96,17 @@ export async function enqueueCandidate(
     id,
     url: candidate.url,
     filename,
-    kind: candidate.kind,
+    // A Vimeo manifest is not downloaded as itself: the caller resolves it into a
+    // video and an audio rendition and enqueues the pair. Reaching here with one means
+    // that step was skipped, and running it as a progressive fetch would save the JSON.
+    kind:
+      candidate.kind === "vimeoadaptive"
+        ? (() => {
+            throw new Error(
+              "a Vimeo adaptive manifest must be resolved into renditions before it is queued",
+            );
+          })()
+        : candidate.kind,
     status: "queued",
     stateJson: "",
     totalBytes: candidate.size,

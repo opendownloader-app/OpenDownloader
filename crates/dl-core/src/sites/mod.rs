@@ -37,6 +37,7 @@ pub mod tiktok;
 pub mod twitch;
 pub mod twitter;
 pub mod vimeo;
+pub mod vimeo_adaptive;
 #[cfg(feature = "platform-sites")]
 pub mod weixin;
 #[cfg(feature = "platform-sites")]

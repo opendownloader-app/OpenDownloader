@@ -381,6 +381,23 @@ pub fn site_name_for(url: &str) -> Option<String> {
     crate::sites::site_for(url).map(str::to_string)
 }
 
+/// Whether a URL is one of Vimeo's JSON adaptive manifests.
+#[wasm_bindgen]
+pub fn is_vimeo_manifest(url: &str) -> bool {
+    crate::sites::vimeo_adaptive::is_adaptive_playlist(url)
+}
+
+/// Read Vimeo's JSON adaptive manifest, or `None` when it is not one.
+///
+/// Returns the renditions with every segment URL already absolute and every byte offset
+/// laid out, so a caller can serve any range of a rendition by fetching only the
+/// segments it covers.
+#[wasm_bindgen]
+pub fn parse_vimeo_manifest(json: &str, playlist_url: &str) -> Option<String> {
+    let parsed = crate::sites::vimeo_adaptive::parse(json, playlist_url)?;
+    serde_json::to_string(&parsed).ok()
+}
+
 /// Which track a sniffed URL carries: `"video"`, `"audio"` or `"muxed"`.
 #[wasm_bindgen]
 pub fn track_kind(url: &str, mime: Option<String>) -> String {
