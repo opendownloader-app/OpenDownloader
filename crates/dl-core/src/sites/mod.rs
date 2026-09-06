@@ -435,6 +435,24 @@ pub fn site_accepts_fetched_page(url: &str) -> bool {
     extractor_for(url).is_some_and(|e| e.accepts_fetched_page())
 }
 
+/// Whether a host with no tab to read — the web app — can resolve this URL at all.
+///
+/// Two ways that is true, and using only the second is a bug this has already had: an
+/// extractor whose *first* move is a fetch never wanted a page in the first place
+/// (YouTube), and one that did ask for a page may have said it can carry on from a
+/// fetched copy (Bilibili). [`site_accepts_fetched_page`] answers only the second, so
+/// asking it alone reports YouTube as extension-only.
+///
+/// Starting the extractor is the honest way to know, and costs nothing: `start` is pure
+/// and performs no I/O.
+pub fn site_works_without_a_tab(url: &str) -> bool {
+    let Some(mut extractor) = extractor_for(url) else {
+        return false;
+    };
+    matches!(extractor.start(url), Ok(Step::Need(Need::Fetch(_))))
+        || extractor.accepts_fetched_page()
+}
+
 /// Whether any extractor claims this URL.
 pub fn is_supported(url: &str) -> bool {
     extractor_for(url).is_some()
@@ -778,7 +796,7 @@ mod catalogue {
     #[test]
     fn every_entry_matches_the_extractor_it_names() {
         for site in supported_sites() {
-            let mut extractor = extractor_for(site.example)
+            let extractor = extractor_for(site.example)
                 .unwrap_or_else(|| panic!("no extractor claims {}", site.example));
             // `starts_with`, not equality: an entry may narrow the extractor's own name
             // where the extractor handles less than the brand ("Twitch clips" — VODs and
@@ -795,11 +813,7 @@ mod catalogue {
             // Without a tab, a host can only work from fetches. So the claim holds when
             // the first move is a fetch, or when the extractor has said it can carry on
             // from a page someone fetched for it.
-            let starts_with_fetch = matches!(
-                extractor.start(site.example),
-                Ok(Step::Need(Need::Fetch(_)))
-            );
-            let reachable = starts_with_fetch || extractor.accepts_fetched_page();
+            let reachable = site_works_without_a_tab(site.example);
             assert_eq!(
                 site.without_a_tab,
                 reachable,

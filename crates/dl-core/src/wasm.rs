@@ -359,6 +359,16 @@ pub fn supported_sites() -> String {
     serde_json::to_string(&sites).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// Whether a host with no tab to read can resolve this URL at all.
+///
+/// This is the one a front end should ask before refusing a link. See the note on
+/// `sites::site_works_without_a_tab`: the narrower question below answers only half of
+/// it, and asking that alone reports YouTube as extension-only.
+#[wasm_bindgen]
+pub fn site_works_without_a_tab(url: &str) -> bool {
+    crate::sites::site_works_without_a_tab(url)
+}
+
 /// Whether this URL's extractor can work from a fetched page rather than a loaded tab.
 ///
 /// A host with no tab to read — the web app — asks this before offering to fetch the

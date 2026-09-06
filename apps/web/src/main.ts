@@ -26,6 +26,7 @@ import {
   remuxLocalSegments,
   resolveDownloadLink,
   siteAcceptsFetchedPage,
+  siteWorksWithoutATab,
   supportedSites,
   siteFor,
   updateSettings,
@@ -188,6 +189,24 @@ async function addFromTorrent(link: string): Promise<boolean> {
   renderTorrentFiles(torrent);
   statusEl.textContent = "";
   return true;
+}
+
+/**
+ * A site whose page only a browser extension can read.
+ *
+ * Its own type rather than a plain `Error` so the handler can render the extension links
+ * as links. A message that says "install the extension" and gives no way to is a message
+ * that has stopped one step short.
+ */
+class SiteNeedsExtension extends Error {
+  constructor(readonly site: string) {
+    super(
+      `${site} has to be read from its own page. A web page is not allowed to read ` +
+        `another site's page, and ${site} tells a server that asks nothing useful — so ` +
+        `this one genuinely cannot. The extension reads the page you are already on, ` +
+        `and it is free.`,
+    );
+  }
 }
 
 /**
@@ -376,10 +395,24 @@ async function addFromSite(url: string): Promise<boolean> {
   if (!(await isSupportedSite(url))) return false;
 
   const site = (await siteFor(url)) ?? "that site";
+  // The broad question — can this be resolved here at all — not the narrow one about
+  // fetched pages, which is false for every fetch-first extractor including YouTube.
+  const reachable = await siteWorksWithoutATab(url);
+
+  // Answer before trying, not after failing.
+  //
+  // These sites are known in advance to be unreadable from here — TikTok answers a
+  // server with a bot-challenge page, Douyin's detail API wants a signature that
+  // rotates, Facebook and Instagram answer 400 or a login shell — so attempting the
+  // fetch first buys nothing but a slower, vaguer refusal. Naming the site and pointing
+  // at the thing that does work is the whole of what this page can usefully do.
+  if (!reachable) {
+    throw new SiteNeedsExtension(site);
+  }
+
   statusEl.textContent = `Asking ${site} what it has…`;
-  // Only where the extractor has said it can work from a fetched page. Offering it
-  // everywhere would turn four sites' clear "use the extension there" into a parse
-  // failure that reads as though the site had broken.
+  // The narrow flag still gates the page fetch itself: only an extractor that asked
+  // for page state, and said it can use a fetched copy, should be handed one.
   const extraction = await extract(url, {
     readPageState: (await siteAcceptsFetchedPage(url))
       ? fetchPageState
@@ -687,6 +720,28 @@ async function add(): Promise<void> {
   } catch (e) {
     statusEl.className = "status-error";
     const message = e instanceof Error ? e.message : String(e);
+
+    // The one refusal with somewhere to send you. Rendered with the store links rather
+    // than a sentence describing them.
+    if (e instanceof SiteNeedsExtension) {
+      statusEl.replaceChildren(
+        document.createTextNode(message + " "),
+        ...(
+          [
+            ["Chrome", "https://chromewebstore.google.com/"],
+            ["Edge", "https://microsoftedge.microsoft.com/addons"],
+            ["Firefox", "https://addons.mozilla.org/"],
+          ] as [string, string][]
+        ).flatMap(([label, href], i) => {
+          const a = document.createElement("a");
+          a.href = href;
+          a.textContent = label;
+          return i === 0 ? [a] : [document.createTextNode(" · "), a];
+        }),
+      );
+      goButton.disabled = false;
+      return;
+    }
     // Two shapes of the same problem: the site answered 403, or the browser refused to
     // let this page read the answer at all. Both mean "a web page cannot ask this site
     // directly", and both have the same two answers — so they get the same sentence

@@ -226,6 +226,18 @@ export async function siteFor(url: string): Promise<string | undefined> {
 }
 
 /**
+ * Whether a host with no tab to read can resolve this URL at all.
+ *
+ * Ask this before refusing a link. `siteAcceptsFetchedPage` below answers only half of
+ * it — an extractor whose first move is a fetch never wanted a page, so that flag is
+ * false for YouTube even though YouTube works here.
+ */
+export async function siteWorksWithoutATab(url: string): Promise<boolean> {
+  const core = await loadCore();
+  return core.site_works_without_a_tab(url);
+}
+
+/**
  * Whether this URL's extractor can work from a fetched page rather than a loaded tab.
  *
  * A host with no tab to read asks this before offering to fetch the page itself; the
