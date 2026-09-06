@@ -381,6 +381,12 @@ pub fn site_name_for(url: &str) -> Option<String> {
     crate::sites::site_for(url).map(str::to_string)
 }
 
+/// Which track a sniffed URL carries: `"video"`, `"audio"` or `"muxed"`.
+#[wasm_bindgen]
+pub fn track_kind(url: &str, mime: Option<String>) -> String {
+    crate::classify::track_kind(url, mime.as_deref()).to_string()
+}
+
 /// Host patterns to request permission for alongside a site's own page, as JSON.
 ///
 /// `["*://*.zjcdn.com/*", …]` — the CDNs that site streams from. Without these the

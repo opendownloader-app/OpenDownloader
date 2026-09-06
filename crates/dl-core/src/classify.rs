@@ -79,6 +79,36 @@ const SEGMENT_EXTENSIONS: &[&str] = &["ts", "m4s", "cmfv", "cmfa"];
 /// Segment MIME types, same reasoning as [`SEGMENT_EXTENSIONS`].
 const SEGMENT_MIMES: &[&str] = &["video/mp2t", "audio/mp2t"];
 
+/// Which track a media URL carries: `"video"`, `"audio"`, or `"muxed"`.
+///
+/// A site that streams through MSE sends the picture and the sound as two separate
+/// files, and the network listener sees them as two unrelated downloads. Saved on its
+/// own, each is a file that disappoints: silent video, or an audio file that will not
+/// open as a movie. Knowing which is which is what lets the two be offered as one.
+///
+/// ByteDance — Douyin and TikTok — says so in the path: `/media-video-avc1/` against
+/// `/media-audio-und-mp4a/`, observed on a live Douyin reel. Everyone else is read from
+/// the mime type, and anything that says neither is assumed to carry both, which is the
+/// safe default: treating a muxed file as a lone track would refuse a download that
+/// works, while the reverse is visible the moment it is offered.
+pub fn track_kind(url: &str, mime: Option<&str>) -> &'static str {
+    if let Some(mime) = mime {
+        let mime = mime.to_ascii_lowercase();
+        if mime.starts_with("audio/") {
+            return "audio";
+        }
+    }
+    // Checked before the video marker: both contain the substring "media-".
+    let lower = url.to_ascii_lowercase();
+    if lower.contains("/media-audio") || lower.contains("mime_type=audio") {
+        return "audio";
+    }
+    if lower.contains("/media-video") || lower.contains("mime_type=video") {
+        return "video";
+    }
+    "muxed"
+}
+
 /// Whether a stream is an HLS playlist rather than a file.
 ///
 /// Public because the front ends need the same answer and were guessing at it. Both
@@ -513,5 +543,34 @@ mod images_are_not_media {
                 "should still be offered: {url} ({mime:?})"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tracks {
+    use super::*;
+
+    /// The two shapes seen on a live Douyin page, and the default for everything else.
+    #[test]
+    fn a_separate_track_is_told_apart_from_a_whole_file() {
+        let video = "https://v3-dy-o.zjcdn.com/x/video/tos/cn/tos-cn-vd-0026/oEOVC1/media-video-avc1/?a=6383";
+        let audio = "https://v3-web-prime.douyinvod.com/video/tos/cn/tos-cn-ve-15/78f5/media-audio-und-mp4a/?a=6383";
+        // Both are served as `video/mp4`, so the mime cannot tell them apart — the path
+        // is the only signal, which is why it is read at all.
+        assert_eq!(track_kind(video, Some("video/mp4")), "video");
+        assert_eq!(track_kind(audio, Some("video/mp4")), "audio");
+
+        // An honest mime wins wherever a site sends one.
+        assert_eq!(
+            track_kind("https://cdn.test/a.m4a", Some("audio/mp4")),
+            "audio"
+        );
+
+        // Anything that claims neither carries both, and is downloadable alone.
+        assert_eq!(
+            track_kind("https://cdn.test/movie.mp4", Some("video/mp4")),
+            "muxed"
+        );
+        assert_eq!(track_kind("https://cdn.test/movie.mp4", None), "muxed");
     }
 }

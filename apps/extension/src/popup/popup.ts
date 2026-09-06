@@ -7,8 +7,12 @@
 import {
   enqueueCandidate,
   formatSize,
+  jobIdFor,
   mediaHostPatterns,
+  putJob,
+  trackKind,
   type DetectedItem,
+  type ExtractedStream,
 } from "@opendownloader/engine";
 
 import { ext, openManagerTab } from "../platform/webext";
@@ -68,6 +72,95 @@ async function queue(items: DetectedItem[]): Promise<void> {
   window.close();
 }
 
+/**
+ * Offer the newest video track joined to the newest audio track.
+ *
+ * Newest of each rather than every combination: a feed page describes several videos, and
+ * the one being watched is the one whose tracks were fetched last. That is a heuristic
+ * and is labelled as a pairing rather than presented as the site's own rendition, so a
+ * wrong guess is visible instead of silent.
+ */
+async function offerJoinedPair(items: DetectedItem[]): Promise<void> {
+  const kinds = await Promise.all(
+    items.map((i) => trackKind(i.url, i.mime ?? null)),
+  );
+  const newest = (want: string): DetectedItem | undefined => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (kinds[i] === want) return items[i];
+    }
+    return undefined;
+  };
+  const video = newest("video");
+  const audio = newest("audio");
+  if (!video || !audio) return;
+
+  const card = document.createElement("div");
+  card.className = "card item row";
+  const text = document.createElement("div");
+  text.className = "grow";
+  const top = document.createElement("div");
+  top.textContent = "Video + audio, joined here";
+  const bottom = document.createElement("div");
+  bottom.className = "muted";
+  bottom.textContent =
+    "This site sends the picture and the sound separately. Either one alone is not a " +
+    "watchable file; this downloads both and joins them.";
+  text.append(top, bottom);
+
+  const button = document.createElement("button");
+  button.className = "primary";
+  button.textContent = "Download";
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    button.textContent = "Queued";
+    void queueJoined(video, audio);
+  });
+  card.append(text, button);
+  // First, above the individual tracks.
+  listEl.prepend(card);
+}
+
+/** Queue the pair as one merge job, which is the shape the engine already downloads. */
+async function queueJoined(
+  video: DetectedItem,
+  audio: DetectedItem,
+): Promise<void> {
+  const now = Date.now();
+  const stream = (
+    item: DetectedItem,
+    kind: "videoonly" | "audioonly",
+  ): ExtractedStream => ({
+    url: item.url,
+    kind,
+    mime: item.mime ?? null,
+    size: item.size ?? null,
+    // The sniffer saw these requests as the page made them, so whatever the host needs
+    // it already got; nothing extra has to be replayed.
+    headers: [],
+    max_chunk: null,
+  });
+  await putJob({
+    id: jobIdFor(`${video.url}|${audio.url}`),
+    // A merge reads its two streams from `mergeStreams`; `url` is only for display.
+    url: video.pageUrl ?? video.url,
+    filename: "video.mp4",
+    kind: "merge",
+    status: "queued",
+    stateJson: "",
+    totalBytes: (video.size ?? 0) + (audio.size ?? 0) || null,
+    receivedBytes: 0,
+    outputBytes: 0,
+    sha256: null,
+    error: null,
+    createdAt: now,
+    order: now,
+    pageUrl: video.pageUrl,
+    mergeStreams: [stream(video, "videoonly"), stream(audio, "audioonly")],
+  });
+  await openManagerTab();
+  window.close();
+}
+
 function renderCandidates(items: DetectedItem[]): void {
   candidates = items;
   for (const url of [...selected]) {
@@ -77,6 +170,12 @@ function renderCandidates(items: DetectedItem[]): void {
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
   batchEl.hidden = items.length < 2;
+
+  // Sites that stream through MSE send the picture and the sound as two files, and the
+  // listener sees two unrelated downloads. Saving either alone gives a file that
+  // disappoints — silent video, or audio that will not open as a movie — so when both
+  // are present the joined pair is offered first, as the thing most people came for.
+  void offerJoinedPair(items);
 
   for (const item of items) {
     const card = document.createElement("div");

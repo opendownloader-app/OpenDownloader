@@ -335,6 +335,15 @@ export async function mediaHostPatterns(url: string): Promise<string[]> {
   return JSON.parse(core.media_host_patterns(url)) as string[];
 }
 
+/** Which track a sniffed URL carries. `"muxed"` means it is a whole file on its own. */
+export async function trackKind(
+  url: string,
+  mime: string | null,
+): Promise<"video" | "audio" | "muxed"> {
+  const core = await loadCore();
+  return core.track_kind(url, mime ?? undefined) as "video" | "audio" | "muxed";
+}
+
 /** A source with no extractor: a link kind rather than a website. */
 export interface SupportedSource {
   name: string;
