@@ -51,18 +51,20 @@ export async function mountAccountPanel(
 ): Promise<void> {
   if (!root) return;
 
-  // `heading` and `description` are overridden because the element's own defaults are
-  // "Sign in to OpenApps" and "One account for every app in the suite" — correct for
-  // the platform's own pages and wrong on a product page, where the visitor has never
-  // heard of OpenApps and is being asked to trust a sign-in.
+  // `variant="panel"` to match openpixels and openpdfedit, which both render this as a
+  // titled card rather than three bare buttons.
+  //
+  // The panel is also the only variant that renders `heading` and `description`, and
+  // their defaults are "Sign in to OpenApps" / "One account for every app in the
+  // suite" — right for the platform's own pages, wrong here, where the visitor has
+  // never heard of OpenApps and is deciding whether to trust a sign-in. `mark` is the
+  // letter in the panel's tile and defaults to "O" for the same reason.
   const body = document.createElement("div");
   body.className = "stack";
   body.innerHTML = `
-    <p class="muted" style="margin:0">
-      Optional, and it unlocks nothing here. An account carries credits to our other
-      apps; everything on this page stays free either way.
-    </p>
     <openapps-login
+      variant="panel"
+      mark="D"
       heading="Sign in to OpenDownloader"
       description="One account across our apps. You do not need it here — nothing on this page is behind it."
     ></openapps-login>
