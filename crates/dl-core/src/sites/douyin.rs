@@ -525,7 +525,10 @@ mod tests {
         // A page with no video named at all, and a non-numeric value that is not an id.
         assert_eq!(video_id("https://www.douyin.com/jingxuan"), None);
         assert_eq!(video_id("https://www.douyin.com/jingxuan?modal_id="), None);
-        assert_eq!(video_id("https://www.douyin.com/jingxuan?modal_id=login"), None);
+        assert_eq!(
+            video_id("https://www.douyin.com/jingxuan?modal_id=login"),
+            None
+        );
     }
 
     const ROUTER_PAGE: &str = r#"<html><head><title>ignored</title></head><body>
