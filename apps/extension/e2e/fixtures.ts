@@ -52,7 +52,8 @@ export const test = base.extend<TestFixtures>({
 
   context: async ({}, use) => {
     const profile = mkdtempSync(join(tmpdir(), "opendownloader-e2e-"));
-    const dist = join(extDir, "dist");
+    // The end-to-end build, not the one a developer has loaded in their browser.
+    const dist = join(extDir, "dist-e2e");
     const context = await chromium.launchPersistentContext(profile, {
       // The literal string "chromium" is required. Omitting `channel` picks a
       // differently-behaving launch, and `channel: "chrome"` uses real Chrome's

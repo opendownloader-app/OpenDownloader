@@ -13,7 +13,17 @@ import { fileURLToPath } from "node:url";
 
 const extDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const targetBrowser = process.env.TARGET_BROWSER === "firefox" ? "firefox" : "chrome";
-const distDir = join(extDir, targetBrowser === "firefox" ? "dist-firefox" : "dist");
+// Must agree with vite.config.ts: the end-to-end build has its own folder so that
+// widening permissions can never land in the extension someone has loaded unpacked.
+const e2eBuild = process.env.OPENDOWNLOADER_E2E === "1";
+const distName = e2eBuild
+  ? targetBrowser === "firefox"
+    ? "dist-e2e-firefox"
+    : "dist-e2e"
+  : targetBrowser === "firefox"
+    ? "dist-firefox"
+    : "dist";
+const distDir = join(extDir, distName);
 
 function flattenHtmlEntry(nestedRelPath, flatName) {
   const nested = join(distDir, nestedRelPath);
@@ -45,6 +55,11 @@ if (process.env.OPENDOWNLOADER_E2E === "1") {
   const manifestPath = join(distDir, "manifest.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   manifest.host_permissions = ["<all_urls>"];
+  // With everything already required, the optional list is a duplicate and Chrome says
+  // so on load: "Optional permission '<all_urls>' is redundant with the required
+  // permissions". Harmless, but it is a warning in a build whose whole job is to make
+  // real failures visible.
+  delete manifest.optional_host_permissions;
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   console.log("copy-static: E2E BUILD — host_permissions widened to <all_urls>");
 }

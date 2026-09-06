@@ -658,28 +658,36 @@ pub fn supported_sources() -> Vec<SourceInfo> {
     ]
 }
 
-/// The hosts a site serves its *media* from, which are not the host of its page.
+/// The hosts a site needs beyond the one its page is served from.
 ///
-/// This exists because of what a host permission actually gates. Granting
-/// `www.douyin.com` lets the extension read that page — and leaves its network listener
-/// blind to `v3-dy-o.zjcdn.com`, which is where the video bytes come from. The listener
-/// is how a download is found on a site that streams through MSE, where the page holds a
-/// `blob:` URL and nothing else, so being blind to the CDN means finding nothing at all
-/// while everything looks correctly configured.
+/// This exists because of what a host permission actually gates, and it gates two
+/// different things that both broke.
+///
+/// A **fetch** from an extension page is subject to CORS unless the extension holds a
+/// permission for the target host. Vimeo's player config lives on `player.vimeo.com`
+/// while the page is `vimeo.com`, so extraction failed with *"No
+/// 'Access-Control-Allow-Origin' header is present"* — a message that names nothing a
+/// user can act on.
+///
+/// The **network listener** only observes hosts the extension may access. Douyin's video
+/// comes from `zjcdn.com`, so with only `douyin.com` granted the popup stayed empty and
+/// reported that the site had changed.
+///
+/// Both are the same omission: the page's host is not where the work happens.
 ///
 /// It is not the same question as [`Extractor`] routing. `matches` decides which
-/// extractor claims a URL, and adding a CDN there would route a bare media URL to a page
-/// extractor that cannot read it. This decides which hosts to *ask permission for* when
-/// a user enables a site, and the two lists differ on purpose.
+/// extractor claims a URL; putting an API or CDN host there would route a bare media URL
+/// to a page extractor that cannot read it. A test asserts the two never agree.
 ///
-/// Only hosts observed serving media are listed. A guessed CDN is a permission asked for
-/// and never used, which is worse than the prompt it adds.
+/// Every entry is either a host this crate's own code requests, or one observed serving
+/// media. A guessed CDN is a permission asked for and never used, which is worse than the
+/// prompt it costs.
 pub fn media_hosts(url: &str) -> Vec<&'static str> {
     let Some(host) = crate::policy::host_of(url) else {
         return Vec::new();
     };
     if douyin::matches(&host) {
-        // `zjcdn.com` observed serving a reel; the other two are Douyin's other CDNs.
+        // `zjcdn.com` observed serving a reel; the others are Douyin's sibling CDNs.
         vec!["zjcdn.com", "douyinvod.com", "bytecdn.cn"]
     } else if meta::matches(&host) {
         vec!["fbcdn.net", "cdninstagram.com"]
@@ -690,8 +698,16 @@ pub fn media_hosts(url: &str) -> Vec<&'static str> {
             "tiktokv.com",
             "byteoversea.com",
         ]
+    } else if vimeo::matches(&host) {
+        // `player.vimeo.com` is where the config this extractor cannot work without
+        // lives, and it is a different host from the page.
+        vec!["player.vimeo.com", "vimeocdn.com", "captions.vimeo.com"]
     } else if bilibili::matches(&host) {
-        vec!["bilivideo.com", "akamaized.net"]
+        vec!["api.bilibili.com", "bilivideo.com", "akamaized.net"]
+    } else if twitch::matches(&host) {
+        vec!["gql.twitch.tv", "twitchcdn.net", "ttvnw.net"]
+    } else if twitter::matches(&host) {
+        vec!["cdn.syndication.twimg.com", "video.twimg.com"]
     } else if weixin::matches(&host) {
         vec!["qpic.cn", "video.qq.com"]
     } else {
@@ -888,6 +904,20 @@ mod catalogue {
 
         assert!(media_hosts("https://www.facebook.com/reel/1").contains(&"fbcdn.net"));
         assert!(media_hosts("https://www.instagram.com/reel/x/").contains(&"cdninstagram.com"));
+
+        // The host an extractor *fetches* from counts too, not only the one serving
+        // bytes. Vimeo's config is on `player.vimeo.com` while the page is `vimeo.com`,
+        // and without permission that fetch is refused by CORS before extraction starts.
+        let vimeo = media_hosts("https://vimeo.com/1086925006");
+        assert!(
+            vimeo.contains(&"player.vimeo.com"),
+            "the config host: {vimeo:?}"
+        );
+        assert!(
+            vimeo.contains(&"vimeocdn.com"),
+            "where the media is: {vimeo:?}"
+        );
+        assert!(media_hosts("https://www.bilibili.com/video/BV1").contains(&"api.bilibili.com"));
         // A site with no separate media host, and a site with no extractor at all.
         assert!(media_hosts("https://www.youtube.com/watch?v=1").is_empty());
         assert!(media_hosts("https://example.com/a.mp4").is_empty());

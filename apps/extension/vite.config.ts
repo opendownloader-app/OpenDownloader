@@ -38,7 +38,22 @@ export default defineConfig({
     __OPENDOWNLOADER_E2E__: JSON.stringify(e2e),
   },
   build: {
-    outDir: targetBrowser === "firefox" ? "dist-firefox" : "dist",
+    // The end-to-end build goes to its own folder, and that separation is the point.
+    // It widens `host_permissions` to `<all_urls>` so a suite need not click permission
+    // prompts, and it used to overwrite `dist` — the very folder a developer has loaded
+    // unpacked in their browser. Running the suite therefore swapped their extension for
+    // one holding every permission, and a reload at the wrong moment left it there,
+    // announcing itself only as "Optional permission '<all_urls>' is redundant".
+    //
+    // Nothing that widens permissions may share an output directory with the build
+    // people actually run.
+    outDir: e2e
+      ? targetBrowser === "firefox"
+        ? "dist-e2e-firefox"
+        : "dist-e2e"
+      : targetBrowser === "firefox"
+        ? "dist-firefox"
+        : "dist",
     emptyOutDir: true,
     target: "es2022",
     // Each extension page lives in its own isolated JS world with no shared

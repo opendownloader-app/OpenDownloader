@@ -19,13 +19,32 @@ export const ext: typeof chrome =
  * unattended on Firefox.
  */
 /**
- * Rule ids this extension owns.
+ * Serializes id allocation, so two downloads started together cannot pick the same id.
  *
- * `declarativeNetRequest` session rules are global to the extension, so ids have to be
- * unique across concurrent downloads. A counter is enough: session rules do not survive
- * a browser restart, and nothing else in this extension registers any.
+ * Each allocation reads the rules already registered before choosing, and that read and
+ * the write that follows have to happen as one step. Without this, two concurrent calls
+ * both read the same maximum and both add rules numbered from it.
  */
-let nextRuleId = 1;
+let ruleQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Ids that are free right now, chosen from the rules already registered.
+ *
+ * A plain counter was wrong, and the way it was wrong is worth keeping written down.
+ * `declarativeNetRequest` session rules live as long as the browser session, but a
+ * counter in a page lives only as long as that page — so reloading the manager tab
+ * restarted it at 1 while the rules it had already added were still there, and the next
+ * download failed with "Rule with id 2 does not have a unique ID". Two extension
+ * contexts running at once collided the same way, with no reload involved.
+ *
+ * Reading the live rules is the only source of truth for what is taken, since they
+ * outlive every counter that might be kept.
+ */
+async function allocateRuleIds(count: number): Promise<number[]> {
+  const existing = await ext.declarativeNetRequest.getSessionRules();
+  const base = existing.reduce((max, rule) => Math.max(max, rule.id), 0) + 1;
+  return Array.from({ length: count }, (_, i) => base + i);
+}
 
 export const extensionPlatform: Platform = {
   canSaveSilently: true,
@@ -43,12 +62,12 @@ export const extensionPlatform: Platform = {
    * headers on unrelated requests to the same host.
    */
   async applyRequestHeaders(urls, headers) {
-    const ids: number[] = [];
-    const rules = urls.map((url) => {
-      const id = nextRuleId++;
-      ids.push(id);
-      return {
-        id,
+    // Queued behind any allocation already in flight, so the read of existing rules and
+    // the write that follows it cannot interleave with another download's.
+    const run = ruleQueue.then(async () => {
+      const ids = await allocateRuleIds(urls.length);
+      const rules = urls.map((url, index) => ({
+        id: ids[index]!,
         priority: 1,
         action: {
           type: "modifyHeaders" as chrome.declarativeNetRequest.RuleActionType,
@@ -72,12 +91,26 @@ export const extensionPlatform: Platform = {
             "other",
           ] as chrome.declarativeNetRequest.ResourceType[],
         },
-      };
-    });
+      }));
 
-    await ext.declarativeNetRequest.updateSessionRules({ addRules: rules, removeRuleIds: [] });
+      // The ids are removed as well as added. They were free a moment ago, so this is a
+      // no-op in the ordinary case — but it makes the call idempotent rather than an
+      // error if anything did claim one in between.
+      await ext.declarativeNetRequest.updateSessionRules({
+        addRules: rules,
+        removeRuleIds: ids,
+      });
+      return ids;
+    });
+    // The queue advances whether this succeeded or not; a failed allocation must not
+    // wedge every download that follows it.
+    ruleQueue = run.catch(() => undefined);
+
+    const ids = await run;
     return async () => {
-      await ext.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids });
+      await ext.declarativeNetRequest.updateSessionRules({
+        removeRuleIds: ids,
+      });
     };
   },
   async saveBlob(blob, filename) {
