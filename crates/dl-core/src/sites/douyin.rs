@@ -74,9 +74,23 @@ impl Extractor for Douyin {
 /// Turn a watch page's HTML into an [`Extraction`]. Pure; the tests call it directly.
 pub fn parse_video_page(html: &str, page_url: &str) -> Result<Extraction, SiteError> {
     let id = video_id(page_url);
-    let aweme = aweme_from_router(html, id.as_deref())
-        .or_else(|| aweme_from_initial_state(html))
-        .ok_or_else(shape)?;
+    let aweme = match aweme_from_router(html, id.as_deref()).or_else(|| aweme_from_initial_state(html))
+    {
+        Some(aweme) => aweme,
+        // Nothing in the page describes a video. On a permalink that means the page
+        // changed shape and `Shape` is the right answer. On a feed or overlay page it
+        // does not: Douyin plays those through MSE, so the page holds a `blob:` URL and
+        // states no address anywhere, by design and not by breakage. Saying "the site has
+        // probably changed" there is false, and it sends someone looking for a fix that
+        // does not exist — while the thing that does work goes unmentioned.
+        None if is_feed_page(page_url) => {
+            return Err(SiteError::Unavailable(
+                "This Douyin page plays the video without ever stating its address, so                  there is nothing here to read. Play the video, then open this popup                  again — the list below finds it from the network instead. Douyin sends                  the picture and the sound separately, so expect one of each."
+                    .to_string(),
+            ))
+        }
+        None => return Err(shape()),
+    };
 
     let title = aweme
         .get("desc")
@@ -455,6 +469,16 @@ fn duration_ms(aweme: &Value, video: &Value) -> Option<u64> {
         .filter(|ms| *ms > 0)
 }
 
+/// Whether this is a feed or overlay page rather than a video's own permalink.
+///
+/// `douyin.com/jingxuan?modal_id=…`, `/discover`, a user's page, the home feed: the video
+/// opens on top of a list, and the page describes the list rather than the video.
+fn is_feed_page(page_url: &str) -> bool {
+    !page_url.contains("/video/") && modal_id(page_url).is_some()
+        || page_url.contains("/jingxuan")
+        || page_url.contains("/discover")
+}
+
 /// The numeric id of the video a URL names.
 ///
 /// Two shapes, because Douyin has two. A permalink puts the id in the path —
@@ -496,6 +520,35 @@ fn modal_id(page_url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_feed_page_with_no_data_is_explained_rather_than_blamed_on_the_site() {
+        let empty = "<html><head><title>抖音</title></head><body></body></html>";
+
+        // An overlay page states no address by design; saying the site changed is false.
+        let err = parse_video_page(
+            empty,
+            "https://www.douyin.com/jingxuan?modal_id=7681584405361560878",
+        )
+        .unwrap_err();
+        match err {
+            SiteError::Unavailable(m) => {
+                assert!(
+                    m.contains("Play the video"),
+                    "must name what actually works: {m}"
+                );
+                assert!(!m.contains("changed"), "must not blame the site: {m}");
+            }
+            other => panic!("expected Unavailable, got {other:?}"),
+        }
+
+        // A permalink with no data really is a shape change.
+        assert!(matches!(
+            parse_video_page(empty, "https://www.douyin.com/video/7300000000000000001")
+                .unwrap_err(),
+            SiteError::Shape(_)
+        ));
+    }
 
     #[test]
     fn the_id_is_read_from_a_permalink_or_from_modal_id() {
