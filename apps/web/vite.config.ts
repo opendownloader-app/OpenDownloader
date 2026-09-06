@@ -104,12 +104,12 @@ export default defineConfig({
     },
   },
   build: {
-    // Two entry points: the app, and the sign-in page. Sign-in is a separate document
-    // on purpose — see the comment at the top of src/login.ts.
+    // Two entry points: the app, and the account page. The account page is a separate
+    // document on purpose — see the comment at the top of src/account-page.ts.
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        login: resolve(__dirname, "login.html"),
+        account: resolve(__dirname, "account.html"),
       },
     },
     target: "es2022",

@@ -36,7 +36,7 @@ import {
 } from "@opendownloader/engine";
 import { Manager, candidateForUrl, mountTools } from "@opendownloader/ui";
 
-import { reflectAccountState } from "./account";
+import { reflectAccountState } from "./account-badge";
 import { mountTranscribePanel } from "./transcribe-panel";
 
 // Test-only engine configuration, applied before anything can start a download.
