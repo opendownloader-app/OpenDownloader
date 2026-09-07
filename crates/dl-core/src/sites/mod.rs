@@ -687,7 +687,22 @@ pub fn media_hosts(url: &str) -> Vec<&'static str> {
     let Some(host) = crate::policy::host_of(url) else {
         return Vec::new();
     };
-    if douyin::matches(&host) {
+    if youtube::matches(&host) {
+        // The bytes are never on the page's host: every YouTube stream is served from a
+        // numbered `googlevideo.com` node. Without permission for it the extraction
+        // succeeds, the options render, and the download then fails with "Failed to
+        // fetch" — the browser refusing a cross-origin read, which looks like a dead
+        // link rather than a missing grant.
+        //
+        // `youtube.com` is here for the page hosts that are not `www`: the player
+        // endpoint the extractor cannot work without lives on `www.youtube.com`, which
+        // is a different host when the page is `youtu.be` or `m.youtube.com`.
+        vec!["googlevideo.com", "youtube.com"]
+    } else if dailymotion::matches(&host) {
+        // Same shape: the metadata endpoint is on `www.dailymotion.com`, which a
+        // `dai.ly` page does not have permission for, and the media is on `dmcdn.net`.
+        vec!["dmcdn.net", "dailymotion.com"]
+    } else if douyin::matches(&host) {
         // `zjcdn.com` observed serving a reel; the others are Douyin's sibling CDNs.
         vec!["zjcdn.com", "douyinvod.com", "bytecdn.cn"]
     } else if meta::matches(&host) {
@@ -919,8 +934,32 @@ mod catalogue {
             "where the media is: {vimeo:?}"
         );
         assert!(media_hosts("https://www.bilibili.com/video/BV1").contains(&"api.bilibili.com"));
-        // A site with no separate media host, and a site with no extractor at all.
-        assert!(media_hosts("https://www.youtube.com/watch?v=1").is_empty());
+
+        // This assertion used to read `is_empty()`, describing YouTube as "a site with
+        // no separate media host". That was simply false — every YouTube stream comes
+        // from a numbered `googlevideo.com` node — and stating it here is what kept the
+        // gap alive: extraction worked, the qualities rendered, and the download died
+        // with "Failed to fetch" because permission for the CDN had never been asked
+        // for. A test that asserts the absence of a permission is worth this much
+        // suspicion.
+        let youtube = media_hosts("https://www.youtube.com/watch?v=1");
+        assert!(
+            youtube.contains(&"googlevideo.com"),
+            "where every YouTube stream is served from: {youtube:?}"
+        );
+        // From a short link the page host is `youtu.be`, so the player endpoint on
+        // `www.youtube.com` is cross-origin and needs its own grant.
+        let short = media_hosts("https://youtu.be/aqz-KE-bpKQ");
+        assert!(
+            short.contains(&"youtube.com"),
+            "the player endpoint: {short:?}"
+        );
+
+        let dailymotion = media_hosts("https://www.dailymotion.com/video/x1");
+        assert!(dailymotion.contains(&"dmcdn.net"), "{dailymotion:?}");
+        assert!(dailymotion.contains(&"dailymotion.com"), "{dailymotion:?}");
+
+        // A site with no extractor at all.
         assert!(media_hosts("https://example.com/a.mp4").is_empty());
 
         // The two lists are different questions: a CDN must not claim a page extractor.
