@@ -7,6 +7,10 @@ repository.workspace = true
 description = "Optional self-hosted streaming CORS relay for the opendownloader web app"
 publish = false
 
+[lib]
+name = "dl_relay"
+path = "src/lib.rs"
+
 [[bin]]
 name = "dl-relay"
 path = "src/main.rs"

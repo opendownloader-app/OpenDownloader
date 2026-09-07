@@ -7,6 +7,10 @@ repository.workspace = true
 description = "Optional local BitTorrent bridge: turns a swarm into an ordinary HTTP resource for the opendownloader web app and extension"
 publish = false
 
+[lib]
+name = "dl_torrent"
+path = "src/lib.rs"
+
 [[bin]]
 name = "dl-torrent"
 path = "src/main.rs"

@@ -1,0 +1,23 @@
+[package]
+name = "dl-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "OpenDownloader as one local program: the web app, the relay and the torrent bridge on a single loopback port, with nothing to start by hand"
+publish = false
+
+[[bin]]
+name = "opendownloader"
+path = "src/main.rs"
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true, features = ["fs", "cors"] }
+anyhow = { workspace = true }
+dl-relay = { path = "../dl-relay" }
+dl-torrent = { path = "../dl-torrent" }
+reqwest = { workspace = true }
+rust-embed = "8"
+mime_guess = "2"

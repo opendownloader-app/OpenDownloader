@@ -157,19 +157,37 @@ const CAN_REACH_LOOPBACK =
   location.hostname === "localhost";
 let torrentBridge: string | null = null;
 
+/**
+ * Where the helpers might be, best first.
+ *
+ * Same origin comes first because that is the desktop build: one program serving the
+ * app, the relay and the bridge on one port. It is the only arrangement with nothing to
+ * start by hand, and the only one a page served over https could ever reach — mixed
+ * content forbids a secure page from talking to `http://127.0.0.1`, whatever is
+ * listening there.
+ *
+ * The separate ports stay as the second guess, for the repository checkout where the
+ * three run as three programs.
+ */
+function candidateBases(sameOriginPath: string, loopback: string): string[] {
+  return [`${location.origin}${sameOriginPath}`, loopback];
+}
+
 async function adoptTorrentBridge(): Promise<void> {
-  try {
-    const probe = await fetch(`${LOCAL_TORRENT_BRIDGE}/healthz`, {
-      signal: AbortSignal.timeout(1200),
-    });
-    if (!probe.ok) return;
-    const health = (await probe.json()) as { service?: string };
-    if (health.service !== "dl-torrent") return;
-  } catch {
-    // Nothing there. The common case, and the refusal text below covers it.
-    return;
+  for (const base of candidateBases("/torrent-bridge", LOCAL_TORRENT_BRIDGE)) {
+    try {
+      const probe = await fetch(`${base}/healthz`, {
+        signal: AbortSignal.timeout(1200),
+      });
+      if (!probe.ok) continue;
+      const health = (await probe.json()) as { service?: string };
+      if (health.service !== "dl-torrent") continue;
+      torrentBridge = base;
+      return;
+    } catch {
+      // Nothing there. The common case for one of the two, and often for both.
+    }
   }
-  torrentBridge = LOCAL_TORRENT_BRIDGE;
 }
 
 /**
@@ -609,18 +627,24 @@ async function adoptLocalRelay(): Promise<void> {
   relay = { url: settings.relayUrl, enabled: settings.useRelay };
   if (settings.relayUrl) return;
 
-  try {
-    const probe = await fetch(`${LOCAL_RELAY}/healthz`, {
-      signal: AbortSignal.timeout(1200),
-    });
-    if (!probe.ok || (await probe.text()).trim() !== "ok") return;
-  } catch {
-    // Nothing there. The common case, and not worth a word to the user.
-    return;
+  let found: string | null = null;
+  for (const base of candidateBases("/relay", LOCAL_RELAY)) {
+    try {
+      const probe = await fetch(`${base}/healthz`, {
+        signal: AbortSignal.timeout(1200),
+      });
+      if (probe.ok && (await probe.text()).trim() === "ok") {
+        found = base;
+        break;
+      }
+    } catch {
+      // Nothing there. The common case, and not worth a word to the user.
+    }
   }
+  if (!found) return;
 
-  relay = { url: LOCAL_RELAY, enabled: true };
-  await updateSettings({ relayUrl: LOCAL_RELAY, useRelay: true });
+  relay = { url: found, enabled: true };
+  await updateSettings({ relayUrl: found, useRelay: true });
   relayAdopted = true;
   mountRelaySettings();
 }

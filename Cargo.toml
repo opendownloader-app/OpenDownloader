@@ -2,6 +2,7 @@
 members = [
     "crates/dl-core",
     "crates/dl-container",
+    "crates/dl-app",
     "crates/dl-relay",
     "crates/dl-torrent",
     "crates/dl-testserver",

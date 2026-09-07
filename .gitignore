@@ -13,3 +13,4 @@ apps/web/public/ort/
 apps/extension/test-results/
 apps/extension/playwright-report/
 test-results/
+dist-app/
