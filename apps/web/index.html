@@ -304,7 +304,16 @@
           hidden
         />
       </div>
-      <p id="url-status" class="muted" style="margin: 8px 0 0"></p>
+      <!-- The wait bar is inserted here by the script, above the status line: a torrent
+           has to find the app, then the swarm, then a peer willing to name its files,
+           and none of that has a percentage that would be true. -->
+      <p
+        id="url-status"
+        class="muted"
+        role="status"
+        aria-live="polite"
+        style="margin: 8px 0 0"
+      ></p>
       <div
         id="site-options"
         class="stack"

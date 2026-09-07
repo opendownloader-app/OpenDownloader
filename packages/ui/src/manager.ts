@@ -42,6 +42,7 @@ import {
   hasFileSystemAccess,
 } from "@opendownloader/engine";
 
+import { Busy, TORRENT_STAGES } from "./busy";
 import { checkbox, el, field } from "./dom";
 
 export interface ManagerOptions {
@@ -74,6 +75,16 @@ export interface ManagerOptions {
 /** Minimum gap between re-renders, so a fast download does not rebuild the list per chunk. */
 const RENDER_INTERVAL_MS = 250;
 
+/**
+ * Is this a link the local bridge has to resolve?
+ *
+ * Only used to decide what to say while waiting — the host's own `addLink` makes the
+ * real decision. Getting it wrong here costs a slightly wrong sentence, nothing more.
+ */
+function isPeerLink(url: string): boolean {
+  return /^magnet:/i.test(url) || /\.torrent(\?|$)/i.test(url);
+}
+
 export class Manager {
   private readonly root: HTMLElement;
   private readonly platform: Platform;
@@ -81,6 +92,8 @@ export class Manager {
   private readonly liveProgress = new Map<string, Progress>();
   private readonly playlistCache = new Map<string, PlaylistOptions>();
   private readonly busy = new Map<string, string>();
+  /** The link box's wait indicator, once it has been rendered. See {@link say}. */
+  private wait: Busy | null = null;
 
   private jobs: Job[] = [];
   private settings: Settings | null = null;
@@ -176,6 +189,17 @@ export class Manager {
     if (this.options.showUrlInput) header.append(this.urlInput());
   }
 
+  /**
+   * Say what is happening during a wait the host started.
+   *
+   * A host's `addLink` can take half a minute — starting the local app, finding a
+   * swarm — and only the host knows which part it is in. The bar is the manager's, so
+   * this is how the host writes to it. Silent when there is no wait in progress.
+   */
+  say(message: string): void {
+    this.wait?.say(message);
+  }
+
   private urlInput(): HTMLElement {
     const input = el("input", {
       type: "url",
@@ -183,12 +207,35 @@ export class Manager {
       placeholder: "https://example.com/video.mp4 or .m3u8",
       spellcheck: false,
     });
-    const status = el("span", { class: "muted" });
+    const wait = new Busy();
+    this.wait = wait;
+    const addButton = el("button", {
+      class: "primary",
+      text: "Add",
+      onClick: () => void add(),
+    });
+    // Every button that starts a wait, disabled for the duration of one. A magnet takes
+    // seconds to resolve and used to look like nothing had happened, so it was pressed
+    // again — and a second press queues the same torrent twice.
+    const buttons: HTMLButtonElement[] = [addButton];
+    let pending = false;
+    const working = (on: boolean): void => {
+      pending = on;
+      for (const button of buttons) button.disabled = on;
+    };
 
     const add = async (): Promise<void> => {
       const url = input.value.trim();
-      if (!url) return;
-      status.textContent = "";
+      if (!url || pending) return;
+      working(true);
+      // A peer link is the slow case and the one that needs saying out loud: the app has
+      // to be found, then the swarm, then a peer that will name the files.
+      wait.start(
+        isPeerLink(url)
+          ? "Looking for the OpenDownloader app, then for peers…"
+          : "Checking that link…",
+        isPeerLink(url) ? TORRENT_STAGES : [],
+      );
       try {
         // The host's own handler where it has one. Without this the manager knew only
         // how to fetch a plain URL, so a magnet pasted here was refused — while the same
@@ -198,6 +245,7 @@ export class Manager {
         if (this.options.addLink) {
           await this.options.addLink(url);
           input.value = "";
+          wait.done();
           return;
         }
         const candidate = await candidateForUrl(url);
@@ -205,8 +253,11 @@ export class Manager {
         // the last point at which it is still valid.
         await this.enqueue(candidate, { start: true });
         input.value = "";
+        wait.done();
       } catch (e) {
-        status.textContent = e instanceof Error ? e.message : String(e);
+        wait.fail(e instanceof Error ? e.message : String(e));
+      } finally {
+        working(false);
       }
     };
 
@@ -214,16 +265,7 @@ export class Manager {
       if ((e as KeyboardEvent).key === "Enter") void add();
     });
 
-    const row = el(
-      "div",
-      { class: "row" },
-      input,
-      el("button", {
-        class: "primary",
-        text: "Add",
-        onClick: () => void add(),
-      }),
-    );
+    const row = el("div", { class: "row" }, input, addButton);
 
     if (this.options.addTorrentFile) {
       // A hidden input driven by a button, because the browser's own file control cannot
@@ -236,30 +278,31 @@ export class Manager {
       picker.addEventListener("change", () => {
         const file = picker.files?.[0];
         if (!file) return;
-        status.textContent = `Reading ${file.name}…`;
+        working(true);
+        wait.start(`Reading ${file.name}…`, TORRENT_STAGES);
         void this.options
           .addTorrentFile?.(file)
           .then(() => {
-            status.textContent = "";
+            wait.done();
           })
           .catch((e: unknown) => {
-            status.textContent = e instanceof Error ? e.message : String(e);
+            wait.fail(e instanceof Error ? e.message : String(e));
           })
           .finally(() => {
+            working(false);
             // Cleared so choosing the same file twice fires `change` the second time.
             picker.value = "";
           });
       });
-      row.append(
-        el("button", {
-          text: "Open .torrent",
-          onClick: () => picker.click(),
-        }),
-        picker,
-      );
+      const openButton = el("button", {
+        text: "Open .torrent",
+        onClick: () => picker.click(),
+      });
+      buttons.push(openButton);
+      row.append(openButton, picker);
     }
 
-    return el("div", { class: "stack" }, row, status);
+    return el("div", { class: "stack" }, row, wait.root);
   }
 
   private scheduleRender(): void {

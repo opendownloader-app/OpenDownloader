@@ -468,3 +468,53 @@ details.panel[open] > summary {
     animation: none !important;
   }
 }
+
+/* ---------- indeterminate bar ----------
+   For a wait with no percentage that would be true. Resolving a torrent is the case it
+   was built for: the swarm answers when a peer answers, so a determinate bar would have
+   to make its number up, and a bar that lies is worse than no bar. This one says only
+   "still working", which is the whole of what is known.
+
+   Same 3px hairline as `progress` above, so the two read as one family — the wait
+   before a download and the download itself. */
+
+.bar {
+  height: 3px;
+  border-radius: var(--radius-full);
+  /* A hairline, not `--bg-sunken`. Sunken is two values off `--bg-page` in the light
+     theme, so the track vanished and the sweep read as a dash floating on nothing;
+     the hairline is the system's own quiet-separation device and holds on the page,
+     on a card and in the dark theme alike. */
+  background: var(--border-hairline);
+  overflow: hidden;
+}
+
+.bar > i {
+  display: block;
+  height: 100%;
+  width: 34%;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  animation: od-sweep 1.15s var(--ease-standard) infinite;
+}
+
+/* 34% wide, and `translateX` is a share of the element's own width — so 294% carries
+   its left edge exactly to the right end of the track. */
+@keyframes od-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(294%);
+  }
+}
+
+/* With motion off the blanket rule above suppresses the sweep, which would leave a
+   third of a bar sitting still — indistinguishable from a download stuck at 34%. A
+   quiet full-width fill says "working" without pretending to move. */
+@media (prefers-reduced-motion: reduce) {
+  .bar > i {
+    width: 100%;
+    opacity: 0.4;
+  }
+}

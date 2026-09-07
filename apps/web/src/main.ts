@@ -47,7 +47,13 @@ import {
   type MediaOption,
   type VideoChoice,
 } from "@opendownloader/engine";
-import { Manager, candidateForUrl, mountTools } from "@opendownloader/ui";
+import {
+  Busy,
+  Manager,
+  TORRENT_STAGES,
+  candidateForUrl,
+  mountTools,
+} from "@opendownloader/ui";
 
 import { reflectAccountState } from "./account-badge";
 import { mountTranscribePanel } from "./transcribe-panel";
@@ -62,6 +68,32 @@ if (__OPENDOWNLOADER_E2E__) {
 const urlInput = document.getElementById("url") as HTMLInputElement;
 const goButton = document.getElementById("go") as HTMLButtonElement;
 const statusEl = document.getElementById("url-status") as HTMLParagraphElement;
+// The bar above the status line, and the schedule of what to say while it sweeps. The
+// paragraph is passed in rather than created, because everything on this page already
+// writes its result there.
+const openTorrentButton = document.getElementById(
+  "open-torrent",
+) as HTMLButtonElement | null;
+const busy = new Busy(statusEl);
+
+/**
+ * Hold both buttons for the duration of either wait.
+ *
+ * Not just the one that was pressed. A torrent takes seconds to resolve, and the two
+ * paths share this one bar and this one status line — so a `.torrent` opened while a
+ * magnet is still resolving gives two waits writing over each other, and whichever
+ * finishes first takes the bar down while the other is still going. Holding both is
+ * also what stops a second press queueing the same files twice, which is what the old
+ * silent wait invited.
+ */
+let pending = false;
+function working(on: boolean): void {
+  pending = on;
+  goButton.disabled = on;
+  if (openTorrentButton) openTorrentButton.disabled = on;
+}
+busy.root.style.marginTop = "10px";
+statusEl.before(busy.root);
 const siteOptionsEl = document.getElementById("site-options") as HTMLDivElement;
 
 /**
@@ -240,7 +272,7 @@ async function addFromTorrent(link: string): Promise<boolean> {
     );
   }
 
-  statusEl.textContent = "Asking the swarm what is in this torrent…";
+  busy.start("Asking the swarm what is in this torrent…", TORRENT_STAGES);
   const response = await fetch(`${torrentBridge}/torrent`, {
     method: "POST",
     // A magnet goes as text; a `.torrent` URL is fetched by the bridge itself, which can
@@ -259,7 +291,7 @@ async function addFromTorrent(link: string): Promise<boolean> {
     files: { index: number; name: string; length: number; url: string }[];
   };
   renderTorrentFiles(torrent);
-  statusEl.textContent = "";
+  busy.done();
   return true;
 }
 
@@ -1020,8 +1052,9 @@ async function renderSupportedSites(root: HTMLElement | null): Promise<void> {
  * copied as a link.
  */
 async function addTorrentFile(file: File): Promise<void> {
-  statusEl.className = "muted";
-  statusEl.textContent = `Reading ${file.name}\u2026`;
+  if (pending) return;
+  working(true);
+  busy.start(`Reading ${file.name}\u2026`, TORRENT_STAGES);
   try {
     if (!torrentBridge) {
       throw new Error(
@@ -1052,20 +1085,27 @@ async function addTorrentFile(file: File): Promise<void> {
         files: { index: number; name: string; length: number; url: string }[];
       },
     );
-    statusEl.textContent = "";
+    busy.done();
   } catch (e) {
-    statusEl.className = "status-error";
-    statusEl.textContent = e instanceof Error ? e.message : String(e);
+    busy.fail(e instanceof Error ? e.message : String(e));
+  } finally {
+    working(false);
   }
 }
 
 async function add(): Promise<void> {
   const typed = urlInput.value.trim();
-  if (!typed) return;
-  goButton.disabled = true;
+  if (!typed || pending) return;
+  working(true);
   siteOptionsEl.hidden = true;
-  statusEl.className = "muted";
-  statusEl.textContent = "Checking that link…";
+  // A peer link is the slow case and the one worth narrating: `addFromTorrent` takes it
+  // from here with its own stages, but the app has to be found before that can even
+  // start, and that is already a wait.
+  const peer = /^magnet:/i.test(typed) || /\.torrent(\?|$)/i.test(typed);
+  busy.start(
+    peer ? "Looking for the OpenDownloader app…" : "Checking that link…",
+    peer ? TORRENT_STAGES : [],
+  );
   try {
     // A BitTorrent link goes to the local bridge, which has the sockets a tab does not.
     // When no bridge is running this throws with how to start one, rather than with the
@@ -1129,7 +1169,6 @@ async function add(): Promise<void> {
           return i === 0 ? [a] : [document.createTextNode(" · "), a];
         }),
       );
-      goButton.disabled = false;
       return;
     }
     // Two shapes of the same problem: the site answered 403, or the browser refused to
@@ -1151,7 +1190,6 @@ async function add(): Promise<void> {
           "running one will not help this page. Use the browser extension, which is " +
           "never subject to any of this, or open the OpenDownloader app, which has this " +
           "same page inside it.";
-      goButton.disabled = false;
       return;
     }
     statusEl.textContent = looksLikeCorsFailure(e)
@@ -1162,7 +1200,10 @@ async function add(): Promise<void> {
         ? e.message
         : String(e);
   } finally {
-    goButton.disabled = false;
+    // Every branch above has already written its own last word — a queued filename, a
+    // refusal, a list of files. All this has to do is stop the bar sweeping under it.
+    busy.settle();
+    working(false);
   }
 }
 
@@ -1172,7 +1213,7 @@ goButton.addEventListener("click", () => void add());
 const torrentFileInput = document.getElementById(
   "torrent-file",
 ) as HTMLInputElement | null;
-document.getElementById("open-torrent")?.addEventListener("click", () => {
+openTorrentButton?.addEventListener("click", () => {
   torrentFileInput?.click();
 });
 torrentFileInput?.addEventListener("change", () => {

@@ -230,12 +230,23 @@ async function addPastedLink(url: string): Promise<void> {
     await manager.enqueue(await candidateForUrl(url), { start: true });
     return;
   }
+  await queueTorrent(await bridgeForTorrent(), url);
+}
 
+/**
+ * Find the bridge, saying so while it happens.
+ *
+ * Starting the app through the browser is the first thing tried and the slowest part of
+ * the whole wait — the native host is launched, binds a port, and answers — so the
+ * manager's own bar is told what it is waiting for rather than sweeping over nothing.
+ */
+async function bridgeForTorrent(): Promise<string> {
   // The browser-started host first: it needs nothing to be running. Falling back to a
   // bridge already listening covers the app being open, or the standalone binary.
   const bridge = (await startBridgeViaBrowser()) ?? (await findBridge());
   if (!bridge) throw new Error(bridgeMissingMessage());
-  await queueTorrent(bridge, url);
+  manager.say("Asking the swarm what is in this torrent…");
+  return bridge;
 }
 
 /**
@@ -246,9 +257,8 @@ async function addPastedLink(url: string): Promise<void> {
  * any way to hand it a file, which is how most torrents actually arrive.
  */
 async function addTorrentFile(file: File): Promise<void> {
-  const bridge = (await startBridgeViaBrowser()) ?? (await findBridge());
-  if (!bridge) throw new Error(bridgeMissingMessage());
-  await queueTorrent(bridge, await file.arrayBuffer());
+  const bytes = await file.arrayBuffer();
+  await queueTorrent(await bridgeForTorrent(), bytes);
 }
 
 /** Give the bridge a magnet or a torrent's bytes, and queue everything inside it. */
