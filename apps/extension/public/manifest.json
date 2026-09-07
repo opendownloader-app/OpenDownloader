@@ -37,5 +37,6 @@
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
-  }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxPEYoPWLa+5y6T8HB8iWAq4EFqHsR2OorJd0M+cBjupsyG4FN/c8SNB8XbysET5qho+RWolfdck8To8PW2fbQoymMdXOd7K6pNvJ4h4UR0EfEDC4Kr+4pJdKvp8AgSGE9KTmKwFvhp2JGargcZtunmvzTWsSNupB3qF3vUEAy68JCp5jfSPxdASSAIhLUJWQcgAzfSfRB/g2Njx6FIaidCkllNuop1xJALJfpg8GerJbFEeYsqQJAHKKrj7nuvpN1NKOYJ3ZhdYSfOZlXUy3AgZcmDJT4CVQzJO1FaFnu0xF4TbtG6nHwbeWwqs+mkwxTbbbllNRbpeeUGk3QCXxnwIDAQAB"
 }

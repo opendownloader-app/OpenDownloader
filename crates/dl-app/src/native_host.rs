@@ -240,7 +240,17 @@ fn manifest_dirs() -> Vec<PathBuf> {
 fn allowed_origins() -> Vec<String> {
     let mut ids: Vec<String> = installed_extension_ids();
 
-    // The development build's usual id, for the case where nothing is installed yet.
+    // The extension's permanent id, fixed by the `key` field in its manifest.
+    //
+    // Without that key an id is derived from the folder the extension was loaded from —
+    // so it differed per machine, and changed whenever the folder moved. The host allows
+    // one id, so it was wrong again each time, and the browser refuses a mismatch with
+    // "Access to the specified native messaging host is forbidden". Worse, browsers cache
+    // this manifest, so correcting it did not take effect until the browser restarted.
+    //
+    // A fixed id makes registration a thing that happens once and stays true.
+    ids.push("cbeecjhjblfbdjncacbfmlcelgkmklda".to_string());
+    // Ids of anything installed that looks like ours, for a build that predates the key.
     ids.push("apiifoekhnpccalkflkmodllookaacjh".to_string());
     if let Ok(extra) = std::env::var("OPENDOWNLOADER_EXTENSION_IDS") {
         ids.extend(
