@@ -60,6 +60,15 @@ export interface ManagerOptions {
    * host handles every one of them a few centimetres higher up.
    */
   addLink?: (url: string) => Promise<void>;
+  /**
+   * What to do with a `.torrent` chosen from disk.
+   *
+   * A separate hook from {@link addLink} because a file is not a URL and cannot be typed
+   * into a box. Without it a torrent held as a file — which is how most of them arrive,
+   * saved from a page — had no way into the product at all: the bridge accepted the
+   * bytes, and nothing could give them to it.
+   */
+  addTorrentFile?: (file: File) => Promise<void>;
 }
 
 /** Minimum gap between re-renders, so a fast download does not rebuild the list per chunk. */
@@ -205,21 +214,52 @@ export class Manager {
       if ((e as KeyboardEvent).key === "Enter") void add();
     });
 
-    return el(
+    const row = el(
       "div",
-      { class: "stack" },
-      el(
-        "div",
-        { class: "row" },
-        input,
-        el("button", {
-          class: "primary",
-          text: "Add",
-          onClick: () => void add(),
-        }),
-      ),
-      status,
+      { class: "row" },
+      input,
+      el("button", {
+        class: "primary",
+        text: "Add",
+        onClick: () => void add(),
+      }),
     );
+
+    if (this.options.addTorrentFile) {
+      // A hidden input driven by a button, because the browser's own file control cannot
+      // be styled and reads as a foreign object in a row of the product's own controls.
+      const picker = el("input", {
+        type: "file",
+        accept: ".torrent,application/x-bittorrent",
+      }) as HTMLInputElement;
+      picker.hidden = true;
+      picker.addEventListener("change", () => {
+        const file = picker.files?.[0];
+        if (!file) return;
+        status.textContent = `Reading ${file.name}…`;
+        void this.options
+          .addTorrentFile?.(file)
+          .then(() => {
+            status.textContent = "";
+          })
+          .catch((e: unknown) => {
+            status.textContent = e instanceof Error ? e.message : String(e);
+          })
+          .finally(() => {
+            // Cleared so choosing the same file twice fires `change` the second time.
+            picker.value = "";
+          });
+      });
+      row.append(
+        el("button", {
+          text: "Open .torrent",
+          onClick: () => picker.click(),
+        }),
+        picker,
+      );
+    }
+
+    return el("div", { class: "stack" }, row, status);
   }
 
   private scheduleRender(): void {

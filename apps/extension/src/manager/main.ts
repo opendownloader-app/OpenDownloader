@@ -47,6 +47,7 @@ const manager = new Manager({
   platform: extensionPlatform,
   showUrlInput: true,
   addLink: addPastedLink,
+  addTorrentFile,
   notice:
     "Downloads run in this tab. Closing it pauses them — progress is saved, and " +
     "reopening this page resumes from where it stopped.",
@@ -233,27 +234,29 @@ async function addPastedLink(url: string): Promise<void> {
   // The browser-started host first: it needs nothing to be running. Falling back to a
   // bridge already listening covers the app being open, or the standalone binary.
   const bridge = (await startBridgeViaBrowser()) ?? (await findBridge());
-  if (!bridge) {
-    const forbidden = /forbidden/i.test(nativeFailure ?? "");
-    const missing = /not found|no such native/i.test(nativeFailure ?? "");
-    throw new Error(
-      forbidden
-        ? "The OpenDownloader app is installed but does not yet know this extension. " +
-            "Open the app once more — it looks up which extensions are installed each " +
-            "time it starts — then paste the link again."
-        : missing
-          ? "A magnet needs the OpenDownloader app, which is not installed yet, or has " +
-            "never been opened. Install it and open it once; after that this page " +
-            "starts it by itself and it does not have to be running."
-          : "A magnet needs the OpenDownloader app, and the browser could not start " +
-            `it: ${nativeFailure ?? "no reason given"}.`,
-    );
-  }
+  if (!bridge) throw new Error(bridgeMissingMessage());
+  await queueTorrent(bridge, url);
+}
 
-  const response = await fetch(`${bridge}/torrent`, {
-    method: "POST",
-    body: url,
-  });
+/**
+ * Open a `.torrent` held on disk.
+ *
+ * The bridge has always accepted the bytes of one — it tells a link from a file by the
+ * first byte, since bencode begins with `d` and a link never does. What was missing was
+ * any way to hand it a file, which is how most torrents actually arrive.
+ */
+async function addTorrentFile(file: File): Promise<void> {
+  const bridge = (await startBridgeViaBrowser()) ?? (await findBridge());
+  if (!bridge) throw new Error(bridgeMissingMessage());
+  await queueTorrent(bridge, await file.arrayBuffer());
+}
+
+/** Give the bridge a magnet or a torrent's bytes, and queue everything inside it. */
+async function queueTorrent(
+  bridge: string,
+  body: string | ArrayBuffer,
+): Promise<void> {
+  const response = await fetch(`${bridge}/torrent`, { method: "POST", body });
   if (!response.ok) {
     const detail = (await response.json().catch(() => null)) as {
       error?: string;
@@ -269,8 +272,7 @@ async function addPastedLink(url: string): Promise<void> {
   }
 
   // Every file, largest first. A torrent is a thing someone asked for whole, and picking
-  // one of them here would be guessing — the queue shows them all and each can be
-  // removed.
+  // one of them here would be guessing — the queue shows them all and each can be removed.
   for (const file of [...torrent.files].sort((a, b) => b.length - a.length)) {
     await manager.enqueue(
       {
@@ -284,4 +286,20 @@ async function addPastedLink(url: string): Promise<void> {
       { start: true },
     );
   }
+}
+
+/** Why there is no bridge, in words that fit the reason the browser gave. */
+function bridgeMissingMessage(): string {
+  const forbidden = /forbidden/i.test(nativeFailure ?? "");
+  const missing = /not found|no such native/i.test(nativeFailure ?? "");
+  return forbidden
+    ? "The OpenDownloader app is installed but does not yet know this extension. " +
+        "Open the app once more — it looks up which extensions are installed each " +
+        "time it starts — then try again."
+    : missing
+      ? "A torrent needs the OpenDownloader app, which is not installed yet, or has " +
+        "never been opened. Install it and open it once; after that this page starts " +
+        "it by itself and it does not have to be running."
+      : "A torrent needs the OpenDownloader app, and the browser could not start " +
+        `it: ${nativeFailure ?? "no reason given"}.`;
 }

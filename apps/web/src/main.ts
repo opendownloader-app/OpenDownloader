@@ -78,9 +78,31 @@ configureEngine({
     if (!relay.enabled || !relay.url) return url;
     // Already relayed: rewriting twice would nest the query parameter.
     if (url.startsWith(relay.url)) return url;
+    // Never relay something already on this machine. The relay refuses a private
+    // address on purpose — it exists to reach sites that will not answer a page, and
+    // proxying to loopback would let any page it serves reach services on the machine
+    // running it. But the torrent bridge *is* on loopback, so relaying its URLs turned
+    // every torrent download into "server returned 403 Forbidden" from our own relay.
+    if (isLocalAddress(url)) return url;
     return `${relay.url.replace(/\/+$/, "")}/fetch?url=${encodeURIComponent(url)}`;
   },
 });
+
+/** Whether a URL points at this machine, and so must never go through the relay. */
+function isLocalAddress(url: string): boolean {
+  try {
+    const host = new URL(url, location.href).hostname;
+    return (
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "localhost" ||
+      host.endsWith(".localhost")
+    );
+  } catch {
+    // A relative URL is same-origin, and the page itself is what serves the bridge.
+    return true;
+  }
+}
 
 /**
  * What a desktop browser calls itself.
@@ -989,6 +1011,54 @@ async function renderSupportedSites(root: HTMLElement | null): Promise<void> {
   }
 }
 
+/**
+ * Open a `.torrent` chosen from disk.
+ *
+ * The bridge has always accepted the bytes of one — it tells a link from a file by the
+ * first byte, since bencode begins with `d` and a link never does. What was missing was
+ * any way to give it a file, which is how most torrents arrive: saved from a page, not
+ * copied as a link.
+ */
+async function addTorrentFile(file: File): Promise<void> {
+  statusEl.className = "muted";
+  statusEl.textContent = `Reading ${file.name}\u2026`;
+  try {
+    if (!torrentBridge) {
+      throw new Error(
+        CAN_REACH_LOOPBACK
+          ? "A torrent needs the OpenDownloader app, which joins the swarm on this " +
+              "machine. Install it and open it once, then try this file again."
+          : "A torrent needs the OpenDownloader app, and this page cannot reach it: a " +
+              "page served over https is not allowed to talk to a service on your own " +
+              "machine. Open the app itself — it has this same page inside it.",
+      );
+    }
+    const response = await fetch(`${torrentBridge}/torrent`, {
+      method: "POST",
+      body: await file.arrayBuffer(),
+    });
+    if (!response.ok) {
+      const detail = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      throw new Error(
+        detail?.error ?? `the bridge answered ${response.status}`,
+      );
+    }
+    renderTorrentFiles(
+      (await response.json()) as {
+        id: number;
+        name: string;
+        files: { index: number; name: string; length: number; url: string }[];
+      },
+    );
+    statusEl.textContent = "";
+  } catch (e) {
+    statusEl.className = "status-error";
+    statusEl.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
 async function add(): Promise<void> {
   const typed = urlInput.value.trim();
   if (!typed) return;
@@ -1097,6 +1167,22 @@ async function add(): Promise<void> {
 }
 
 goButton.addEventListener("click", () => void add());
+
+// The file picker beside it: a torrent that arrived as a file has nowhere else to go.
+const torrentFileInput = document.getElementById(
+  "torrent-file",
+) as HTMLInputElement | null;
+document.getElementById("open-torrent")?.addEventListener("click", () => {
+  torrentFileInput?.click();
+});
+torrentFileInput?.addEventListener("change", () => {
+  const file = torrentFileInput.files?.[0];
+  if (!file) return;
+  // Cleared so choosing the same file twice fires `change` the second time.
+  void addTorrentFile(file).finally(() => {
+    torrentFileInput.value = "";
+  });
+});
 urlInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") void add();
 });

@@ -293,6 +293,16 @@
           aria-label="Link to download"
         />
         <button id="go" class="primary">Download</button>
+        <!-- A torrent usually arrives as a file, not a link, and a file cannot be typed
+             into the box beside this. The input is hidden because the browser's own file
+             control cannot be styled to sit in a row of the product's own buttons. -->
+        <button id="open-torrent" type="button">Open .torrent</button>
+        <input
+          id="torrent-file"
+          type="file"
+          accept=".torrent,application/x-bittorrent"
+          hidden
+        />
       </div>
       <p id="url-status" class="muted" style="margin: 8px 0 0"></p>
       <div
