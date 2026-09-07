@@ -28,7 +28,7 @@ import {
   remuxLocalSegments,
   updateSettings,
 } from "@opendownloader/engine";
-import { Manager, mountTools } from "@opendownloader/ui";
+import { Manager, candidateForUrl, mountTools } from "@opendownloader/ui";
 
 import { extensionPlatform } from "../platform/webext";
 
@@ -46,6 +46,7 @@ const manager = new Manager({
   root: document.getElementById("manager") as HTMLElement,
   platform: extensionPlatform,
   showUrlInput: true,
+  addLink: addPastedLink,
   notice:
     "Downloads run in this tab. Closing it pauses them — progress is saved, and " +
     "reopening this page resumes from where it stopped.",
@@ -77,7 +78,8 @@ if (__OPENDOWNLOADER_E2E__) {
     updateSettings,
     // The media pipelines, reachable without the file picker automation cannot
     // drive. Everything after the picker is the code under test.
-    listPlaylistOptions: async (url: string) => listPlaylistOptions(url, await loadCore()),
+    listPlaylistOptions: async (url: string) =>
+      listPlaylistOptions(url, await loadCore()),
     audioRenditionFor,
     fetchSubtitleRendition,
     extractMp4Audio,
@@ -108,3 +110,94 @@ window.addEventListener("beforeunload", (e) => {
     e.returnValue = "";
   }
 });
+
+/**
+ * Where a torrent bridge might be listening on this machine.
+ *
+ * Two shapes, because there are two ways to have one. The app serves everything on one
+ * port and mounts the bridge under a path — and it walks up from 5180 when that port is
+ * taken, so a few are worth trying. The standalone `dl-torrent` sits on 8089.
+ *
+ * An extension page may talk to loopback, which is what makes any of this possible here:
+ * a page on https may not, whatever is running.
+ */
+const BRIDGE_CANDIDATES = [
+  "http://127.0.0.1:8089",
+  ...Array.from(
+    { length: 5 },
+    (_, i) => `http://127.0.0.1:${5180 + i}/torrent-bridge`,
+  ),
+];
+
+/** The first bridge that answers, or null. Probed together so this costs one wait. */
+async function findBridge(): Promise<string | null> {
+  const probes = BRIDGE_CANDIDATES.map(async (base) => {
+    const response = await fetch(`${base}/healthz`, {
+      signal: AbortSignal.timeout(1200),
+    });
+    const health = (await response.json()) as { service?: string };
+    if (health.service !== "dl-torrent") throw new Error("not the bridge");
+    return base;
+  });
+  // `any` rather than `all`: the first that answers wins and the rest are irrelevant.
+  return Promise.any(probes).catch(() => null);
+}
+
+/**
+ * Handle a link pasted into the manager's box.
+ *
+ * It used to fetch whatever it was given as a file, so a magnet was refused here while
+ * the very same magnet worked in the web app — two boxes that look alike and behave
+ * differently, and this is the one that sits beside the downloads.
+ */
+async function addPastedLink(url: string): Promise<void> {
+  const isPeerLink = /^magnet:/i.test(url) || /\.torrent(\?|$)/i.test(url);
+  if (!isPeerLink) {
+    await manager.enqueue(await candidateForUrl(url), { start: true });
+    return;
+  }
+
+  const bridge = await findBridge();
+  if (!bridge) {
+    throw new Error(
+      "A magnet names content on other people's machines, and a browser tab cannot " +
+        "connect to them. The OpenDownloader app can, and this page will use it: " +
+        "install it, leave it running, and paste the link again.",
+    );
+  }
+
+  const response = await fetch(`${bridge}/torrent`, {
+    method: "POST",
+    body: url,
+  });
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(detail?.error ?? `the bridge answered ${response.status}`);
+  }
+  const torrent = (await response.json()) as {
+    name: string;
+    files: { index: number; name: string; length: number; url: string }[];
+  };
+  if (torrent.files.length === 0) {
+    throw new Error(`${torrent.name} contains no files.`);
+  }
+
+  // Every file, largest first. A torrent is a thing someone asked for whole, and picking
+  // one of them here would be guessing — the queue shows them all and each can be
+  // removed.
+  for (const file of [...torrent.files].sort((a, b) => b.length - a.length)) {
+    await manager.enqueue(
+      {
+        url: `${bridge}${file.url}`,
+        kind: "progressive",
+        // A torrent path can be `Season 1/ep01.mkv`; only the last segment is a name.
+        filename: file.name.split("/").pop() ?? file.name,
+        mime: null,
+        size: file.length,
+      },
+      { start: true },
+    );
+  }
+}

@@ -138,11 +138,10 @@ pub fn peer_link_refusal(url: &str) -> Option<String> {
     Some(format!(
         "{what} names content held by other people's computers, and the file is assembled \
          by connecting to them directly. A browser tab cannot open those connections — \
-         that limit is the tab's, and no permission or relay lifts it. What can is the \
-         bridge that ships with OpenDownloader: `dl-torrent` joins the swarm from this \
-         machine and serves each file inside the torrent over HTTP, byte ranges and all, \
-         so it downloads here like anything else. Start it with `npm start` and open this \
-         link again."
+         that limit is the tab's, and no permission or relay lifts it. The OpenDownloader \
+         app can: it joins the swarm from this machine and serves each file inside the \
+         torrent to this page, so it downloads here like anything else. Install it, leave \
+         it running, and open this link again."
     ))
 }
 
@@ -284,10 +283,17 @@ mod tests {
             "https://example.com/x.torrent?token=1",
         ] {
             let why = peer_link_refusal(link).expect("explained");
-            // The sentence has to name the way through, not merely the obstacle.
+            // The sentence has to name the way through, not merely the obstacle. That
+            // way is the app: it carries the bridge, so there is nothing to start and no
+            // command to type. It used to say `npm start`, which is a way through for
+            // someone who has already cloned the repository and nobody else.
             assert!(
-                why.contains("dl-torrent"),
-                "should point at the bridge: {why}"
+                why.contains("OpenDownloader app"),
+                "should name what to install: {why}"
+            );
+            assert!(
+                !why.contains("npm"),
+                "must not ask for a terminal command: {why}"
             );
             assert!(why.contains("connections"));
         }

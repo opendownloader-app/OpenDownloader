@@ -52,6 +52,14 @@ export interface ManagerOptions {
   notice?: string;
   /** Adds an "Add URL" box. The web app has its own, larger one. */
   showUrlInput?: boolean;
+  /**
+   * What the box does with a pasted link, where the host can do more than fetch a URL.
+   *
+   * Without it the box only knows how to treat a link as a file to download, so magnets,
+   * `ed2k:`, Mega and Quark links are all refused by it — including on a page where the
+   * host handles every one of them a few centimetres higher up.
+   */
+  addLink?: (url: string) => Promise<void>;
 }
 
 /** Minimum gap between re-renders, so a fast download does not rebuild the list per chunk. */
@@ -173,6 +181,16 @@ export class Manager {
       if (!url) return;
       status.textContent = "";
       try {
+        // The host's own handler where it has one. Without this the manager knew only
+        // how to fetch a plain URL, so a magnet pasted here was refused — while the same
+        // magnet pasted into the box further up the same page downloaded. Two boxes that
+        // look alike and behave differently is a trap, and the one that refuses is the
+        // one people reach for, because it sits next to the downloads.
+        if (this.options.addLink) {
+          await this.options.addLink(url);
+          input.value = "";
+          return;
+        }
         const candidate = await candidateForUrl(url);
         // Pressing the button is the gesture a save dialog needs, and this is
         // the last point at which it is still valid.

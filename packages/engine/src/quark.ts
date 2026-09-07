@@ -96,7 +96,7 @@ async function quarkCall(
   if (response.status === 403) {
     throw new Error(
       "Quark refused that request outright. Its API answers only its own site, so this " +
-        "needs the local relay running — start it with `npm start` and try again.",
+        "needs the relay the OpenDownloader app runs. Open the app and try again.",
     );
   }
   const body = (await response.json().catch(() => null)) as {

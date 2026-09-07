@@ -208,14 +208,13 @@ async function addFromTorrent(link: string): Promise<boolean> {
         ? "This is a BitTorrent link, and a browser tab cannot join a swarm — that needs " +
             "TCP connections to other people's machines, which no page, permission or " +
             "relay can open. OpenDownloader ships a local bridge that does it for you: " +
-            "run `npm start` (or `cargo run -p dl-torrent`) and reload this page, and the " +
+            "install the OpenDownloader app, leave it running, and reload this page — the " +
             "files inside the torrent will be listed here like any other download."
         : "This is a BitTorrent link, and a browser tab cannot join a swarm. The bridge " +
-            "that can is a program you run on your own machine — but this page is served " +
-            "over https, and a secure page is not allowed to talk to a plain-http service " +
-            "on your computer, whatever you start. Run the web app locally instead: clone " +
-            "the repository, run `npm start`, and open http://127.0.0.1:5180 — the bridge " +
-            "and the relay both work from there.",
+            "that can is the OpenDownloader app, and this page cannot reach it: a page served " +
+            "over https is not allowed to talk to a service on your own machine, whatever " +
+            "is running there. Open the app itself instead — it has this same page inside " +
+            "it, with torrents working.",
     );
   }
 
@@ -357,13 +356,13 @@ async function addFromQuark(url: string): Promise<boolean> {
     throw new Error(
       CAN_REACH_LOOPBACK
         ? "Quark's API answers only its own site, so a page cannot call it and this " +
-            "needs the local relay. Run `npm start` and reload, and the share will be " +
-            "listed here."
+            "needs the relay the OpenDownloader app runs. Install it, leave it running, and " +
+            "reload — the share will be listed here."
         : "Quark's API answers only its own site, so reading a share needs the relay \u2014 " +
             "a program you run on your own machine. This page is served over https and " +
             "is not allowed to talk to a plain-http service on your computer. Run the " +
-            "web app locally instead: clone the repository, run `npm start`, and open " +
-            "http://127.0.0.1:5180.",
+            "OpenDownloader app instead — it has this same page inside it, with the relay " +
+            "already running.",
     );
   }
 
@@ -1073,13 +1072,15 @@ async function add(): Promise<void> {
     ) {
       statusEl.textContent = CAN_REACH_LOOPBACK
         ? "That site will not answer a web page directly — it refuses every origin but " +
-          "its own. Run the relay (npm start does it, on port 8088) and this page will " +
-          "find it on reload, or use the browser extension, which is never subject to this."
+          "its own. The relay gets around it: install the OpenDownloader app, leave it " +
+          "running, and this page will find it on reload. The browser extension is never " +
+          "subject to this at all."
         : "That site will not answer a web page directly — it refuses every origin but " +
           "its own. The relay that gets around it runs on your machine, and this page " +
-          "is served over https, which is not allowed to talk to a plain-http service " +
-          "there — so starting one will not help here. Use the browser extension, which " +
-          "is never subject to any of this, or run the web app locally with `npm start`.";
+          "is served over https, which is not allowed to talk to a service there — so " +
+          "running one will not help this page. Use the browser extension, which is " +
+          "never subject to any of this, or open the OpenDownloader app, which has this " +
+          "same page inside it.";
       goButton.disabled = false;
       return;
     }
