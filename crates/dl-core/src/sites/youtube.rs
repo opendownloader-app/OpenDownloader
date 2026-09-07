@@ -41,23 +41,34 @@ use super::{
 /// engine's ordinary chunk — is answered `403`, which reads like an authorisation
 /// failure rather than a size complaint and is worth knowing before debugging it.
 ///
-/// # What could not be verified from here, and why
+/// # The wall past the first couple of megabytes
 ///
-/// Measured on 2026-09-05 from a datacenter IP, these URLs serve **only their first
-/// mebibyte**. Offset 0 answers `206`; every offset at or beyond 1 MiB answers `403`
-/// regardless of the range size, on a freshly issued URL, whether the reads are
-/// sequential or not. A short video downloads and merges completely; a long one stops
-/// after the first megabyte.
+/// These URLs serve **only their first ~2 MiB**. Offsets 0 and 1 MiB answer `206`; 5, 10,
+/// 15, 25 and 30 MiB all answer `403`, on a freshly issued URL, at a 64 KiB read size,
+/// with the highest offset requested *first* so that neither request count nor bytes
+/// already transferred can explain it. It is a property of the offset and nothing else.
 ///
-/// That is Google declining to serve bulk media to a datacenter address, not a defect in
-/// this code and not something a different chunk size fixes — it was chased through
-/// per-URL ageing, size ceilings and sequential-access theories, and none of them hold.
-/// A browser on an ordinary connection is the case this product actually runs in, and
-/// there the same URLs stream to completion, which is how YouTube itself plays them.
+/// An earlier version of this note recorded the same measurement from a datacenter IP and
+/// concluded it was Google declining to serve bulk media to datacenters, adding that "a
+/// browser on an ordinary connection... streams to completion". **That is not true, and
+/// it sent a user chasing their own network.** Re-measured on 2026-09-07 from an ordinary
+/// domestic connection: the wall is identical. The error text it justified told people to
+/// try again from a home connection, which is where they already were.
 ///
-/// The consequence for the code is small and already made: a `403` part-way through is
-/// treated as a throttle and retried with backoff rather than failing outright, and when
-/// it persists the user is told the host refused rather than shown a bare status code.
+/// What changed is how YouTube delivers video. `streamingData.formats` — the muxed
+/// progressive entries — now comes back **empty**, `serverAbrStreamingUrl` is present, and
+/// the `adaptiveFormats` URLs are vestigial: enough to start playback, not enough to read
+/// a file. Checked against three unrelated videos, all the same shape.
+///
+/// So a long video cannot be completed through these addresses, by any chunk size, retry
+/// schedule or connection. Reading the rest means speaking the newer streaming protocol,
+/// which is a deliberate restriction on Google's side rather than a gap in this code, and
+/// is not something this extractor tries to talk its way around.
+///
+/// The chunk cap below is still correct and still required: 8 MiB is refused outright, so
+/// even the part that does serve needs 1 MiB reads. What the `403` handling can do is
+/// retry a genuine throttle and then say plainly what happened — see the message in
+/// `fetch-retry.ts`, which now describes this instead of blaming the connection.
 pub const MAX_RANGE_BYTES: u64 = 1024 * 1024;
 
 pub const IOS_USER_AGENT: &str =

@@ -194,10 +194,11 @@ export async function fetchWithRetry(
   // sends people looking for a permissions problem that is not there.
   if (options.retryForbidden && detail.includes("403")) {
     throw new Error(
-      `${new URL(target).hostname} stopped serving this file part-way through. That is ` +
-        "the host rate-limiting, not a problem with the link or with permissions — it is " +
-        "most common on shared, hosted or VPN connections. Trying again later, or from " +
-        "an ordinary home connection, is usually what works.",
+      `${new URL(target).hostname} served the beginning of this file and refused the ` +
+        "rest. YouTube now limits these addresses to roughly their first two megabytes " +
+        "and delivers the remainder over a different protocol, so the part that is " +
+        "missing cannot be fetched this way. Nothing about the link, the permissions or " +
+        "the connection changes it, and retrying will reach the same point again.",
     );
   }
   // A CORS-shaped failure is rethrown as the `TypeError` it was, not wrapped.
