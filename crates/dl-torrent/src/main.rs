@@ -250,6 +250,22 @@ async fn torrent_status(
         .get(id.into())
         .ok_or_else(|| Failure(StatusCode::NOT_FOUND, "no such torrent".into()))?;
     let stats = handle.stats();
+    // Peers, because without them "Live, 0 bytes" is indistinguishable from a bug in
+    // this bridge. A magnet resolves its metadata from peers that hold only that, so a
+    // torrent can name its files in seconds and then never transfer a byte — which is
+    // what a swarm with no seeders looks like from here. Saying how many peers are
+    // connected turns a hang into a fact the reader can act on.
+    let peers = stats.live.as_ref().map(|live| {
+        let p = &live.snapshot.peer_stats;
+        serde_json::json!({
+            "live": p.live,
+            "connecting": p.connecting,
+            "queued": p.queued,
+            "seen": p.seen,
+            "dead": p.dead,
+            "download_bytes_per_second": live.download_speed.mbps * 125_000.0,
+        })
+    });
     Ok(Json(serde_json::json!({
         "id": id,
         "name": handle.name(),
@@ -257,6 +273,7 @@ async fn torrent_status(
         "progress_bytes": stats.progress_bytes,
         "total_bytes": stats.total_bytes,
         "finished": stats.finished,
+        "peers": peers,
     })))
 }
 

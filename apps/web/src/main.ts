@@ -543,6 +543,49 @@ async function queueTorrentFile(
   );
   siteOptionsEl.hidden = true;
   statusEl.textContent = `Queued ${file.name} from ${torrent.name}.`;
+  void watchForPeers(torrent.id);
+}
+
+/**
+ * Say when a torrent has nobody to download from.
+ *
+ * A dead swarm is indistinguishable from a slow one at first glance, and worse than
+ * either: the bridge answers the range request immediately with the length the metadata
+ * states, so the download appears to start and then sits at zero forever. That is not a
+ * fault anything here can fix, and it is not something a reader can guess.
+ *
+ * Metadata comes from peers that need not hold any of the data, which is why a torrent
+ * can name its files in seconds and still never transfer a byte. The distinguishing fact
+ * is the peer counts: connections tried and dying, none staying live.
+ */
+async function watchForPeers(id: number): Promise<void> {
+  // Long enough for a healthy swarm to be plainly under way — a live one reaches
+  // megabytes a second in the first few seconds — and short enough to be worth waiting.
+  const CHECK_AFTER_MS = 25_000;
+  await new Promise((resolve) => setTimeout(resolve, CHECK_AFTER_MS));
+  try {
+    const response = await fetch(`${torrentBridge}/torrent/${id}`);
+    if (!response.ok) return;
+    const status = (await response.json()) as {
+      progress_bytes?: number;
+      peers?: { live?: number; seen?: number; dead?: number } | null;
+    };
+    const peers = status.peers;
+    if ((status.progress_bytes ?? 0) > 0 || !peers) return;
+    if ((peers.live ?? 0) > 0) return;
+
+    statusEl.className = "status-error";
+    statusEl.textContent =
+      (peers.seen ?? 0) > 0
+        ? `No one is sharing this torrent. ${peers.seen} peers were found and ` +
+          `${peers.dead ?? 0} of them dropped the connection without sending anything, ` +
+          "which is what a swarm with no seeders looks like. The file list came from " +
+          "peers that hold the description but not the data."
+        : "No peers could be found for this torrent at all. It may be too old, or the " +
+          "link may name a swarm that no longer exists.";
+  } catch {
+    // The bridge going away is reported by the download itself; nothing to add here.
+  }
 }
 
 /** Where `npm start` puts the relay, and the only address worth guessing. */
