@@ -79,6 +79,11 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("could not register the browser helper: {e}");
     }
 
+    // Advertised for the same reason the browser-started host does it: whichever of the
+    // two is running first, the other must find it rather than start a second torrent
+    // session, which cannot bind the DHT socket a second time.
+    native_host::advertise(&format!("http://{addr}/torrent-bridge"));
+
     let url = format!("http://{addr}/");
     println!("OpenDownloader is running at {url}");
     println!("Close this window to stop it.");

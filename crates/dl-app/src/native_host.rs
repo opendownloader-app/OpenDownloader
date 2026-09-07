@@ -149,17 +149,49 @@ async fn start_bridge() -> anyhow::Result<(String, Option<tokio::task::JoinHandl
     ))
 }
 
+/// Where a running bridge writes the address it can be reached at.
+///
+/// A browser-started host binds a port the operating system picks, so nothing else can
+/// guess it — and guessing wrongly is not harmless: a second torrent session cannot
+/// start while a first is alive, because the DHT socket is already bound, and the
+/// collision surfaces as "error initializing persistent DHT". Leaving the address behind
+/// is what lets the next host find the first instead of colliding with it.
+fn advert_path() -> PathBuf {
+    std::env::temp_dir().join("opendownloader-bridge.json")
+}
+
+/// Record where this bridge is, for the next host that looks.
+pub fn advertise(url: &str) {
+    let _ = std::fs::write(
+        advert_path(),
+        serde_json::to_vec(&json!({ "url": url, "pid": std::process::id() })).unwrap_or_default(),
+    );
+}
+
 /// A bridge already listening on this machine, if there is one.
 ///
-/// Both shapes: the app serves everything on one port and mounts the bridge under a path,
-/// walking up from 5180 when that port is taken; the standalone binary sits on 8089 with
-/// no prefix.
+/// The advert first, since a browser-started host is on a port nobody could guess. Then
+/// the two fixed shapes: the app serves everything on one port and mounts the bridge
+/// under a path, walking up from 5180 when that port is taken; the standalone binary sits
+/// on 8089 with no prefix.
+///
+/// Every candidate is health-checked rather than trusted — an advert outlives the process
+/// that wrote it, and these ports are ordinary ones that anything could be sitting on.
 async fn find_running_bridge() -> Option<String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(400))
         .build()
         .ok()?;
-    let mut candidates = vec!["http://127.0.0.1:8089".to_string()];
+
+    let mut candidates = Vec::new();
+    if let Ok(text) = std::fs::read_to_string(advert_path()) {
+        if let Ok(advert) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(url) = advert.get("url").and_then(|v| v.as_str()) {
+                candidates.push(url.to_string());
+            }
+        }
+    }
+    candidates.push("http://127.0.0.1:8089".to_string());
     candidates.extend((5180..5192).map(|p| format!("http://127.0.0.1:{p}/torrent-bridge")));
 
     for base in candidates {
@@ -169,8 +201,6 @@ async fn find_running_bridge() -> Option<String> {
         let Ok(body) = response.text().await else {
             continue;
         };
-        // Checked by name rather than by "something answered": these ports are ordinary
-        // and anything could be on them.
         if body.contains("\"dl-torrent\"") {
             return Some(base);
         }

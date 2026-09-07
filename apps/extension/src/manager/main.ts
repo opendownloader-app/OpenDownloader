@@ -145,12 +145,17 @@ const BRIDGE_CANDIDATES = [
  * installed — so the caller falls back to looking for one already listening.
  */
 async function startBridgeViaBrowser(): Promise<string | null> {
-  if (!chrome.runtime?.connectNative) return null;
+  if (!chrome.runtime?.connectNative) {
+    nativeFailure =
+      "this browser did not grant permission to start local programs";
+    return null;
+  }
   return new Promise((resolve) => {
     let port: chrome.runtime.Port;
     try {
       port = chrome.runtime.connectNative("app.opendownloader.bridge");
-    } catch {
+    } catch (e) {
+      nativeFailure = e instanceof Error ? e.message : String(e);
       return resolve(null);
     }
     // Held open deliberately: the host lives as long as this port does, so dropping it
@@ -165,15 +170,34 @@ async function startBridgeViaBrowser(): Promise<string | null> {
       (message: { ok?: boolean; url?: string; error?: string }) => {
         // A full URL rather than a port: the host may hand back a bridge that is already
         // running, and those are not all mounted at the same path.
-        settle(message?.ok && message.url ? message.url : null);
+        if (message?.ok && message.url) return settle(message.url);
+        nativeFailure =
+          message?.error ?? "the helper replied with nothing usable";
+        settle(null);
       },
     );
-    port.onDisconnect.addListener(() => settle(null));
+    port.onDisconnect.addListener(() => {
+      // The reason matters and used to be thrown away. "Specified native messaging host
+      // not found" means the app has never been opened; "Access to the specified native
+      // messaging host is forbidden" means it was opened before this extension existed
+      // and does not know its id yet. Those need different answers, and neither is
+      // "install it" — which is what the reader was told for both.
+      nativeFailure =
+        chrome.runtime.lastError?.message ??
+        "the helper stopped without saying why";
+      settle(null);
+    });
     port.postMessage({ type: "start" });
-    // A host that is registered but broken would otherwise hang this forever.
-    setTimeout(() => settle(null), 4000);
+    // A host that is registered but wedged would otherwise hang this forever.
+    setTimeout(() => {
+      nativeFailure = "the helper did not answer";
+      settle(null);
+    }, 8000);
   });
 }
+
+/** Why the browser could not start the helper, for the message when nothing works. */
+let nativeFailure: string | null = null;
 
 /** Kept for the life of the page, because the bridge stops when this closes. */
 let nativePort: chrome.runtime.Port | null = null;
@@ -210,11 +234,19 @@ async function addPastedLink(url: string): Promise<void> {
   // bridge already listening covers the app being open, or the standalone binary.
   const bridge = (await startBridgeViaBrowser()) ?? (await findBridge());
   if (!bridge) {
+    const forbidden = /forbidden/i.test(nativeFailure ?? "");
+    const missing = /not found|no such native/i.test(nativeFailure ?? "");
     throw new Error(
-      "A magnet names content on other people's machines, and a browser tab cannot " +
-        "connect to them. The OpenDownloader app can. Install it and open it once — " +
-        "that is all it needs; after that this page starts it by itself whenever a " +
-        "torrent is pasted, and it does not have to be running.",
+      forbidden
+        ? "The OpenDownloader app is installed but does not yet know this extension. " +
+            "Open the app once more — it looks up which extensions are installed each " +
+            "time it starts — then paste the link again."
+        : missing
+          ? "A magnet needs the OpenDownloader app, which is not installed yet, or has " +
+            "never been opened. Install it and open it once; after that this page " +
+            "starts it by itself and it does not have to be running."
+          : "A magnet needs the OpenDownloader app, and the browser could not start " +
+            `it: ${nativeFailure ?? "no reason given"}.`,
     );
   }
 
