@@ -161,13 +161,13 @@ async function startBridgeViaBrowser(): Promise<string | null> {
       if (value === null && nativePort === port) nativePort = null;
       resolve(value);
     };
-    port.onMessage.addListener((message: { ok?: boolean; port?: number }) => {
-      settle(
-        message?.ok && message.port
-          ? `http://127.0.0.1:${message.port}/torrent-bridge`
-          : null,
-      );
-    });
+    port.onMessage.addListener(
+      (message: { ok?: boolean; url?: string; error?: string }) => {
+        // A full URL rather than a port: the host may hand back a bridge that is already
+        // running, and those are not all mounted at the same path.
+        settle(message?.ok && message.url ? message.url : null);
+      },
+    );
     port.onDisconnect.addListener(() => settle(null));
     port.postMessage({ type: "start" });
     // A host that is registered but broken would otherwise hang this forever.

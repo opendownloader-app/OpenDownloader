@@ -277,6 +277,12 @@ async fn forget_torrent(
 /// seeking it tells librqbit which pieces matter — so a range request pulls the pieces
 /// covering that range rather than the whole torrent, and a download of one file out of a
 /// season pack does not fetch the season.
+/// How long to wait for the first byte before calling a swarm dead.
+///
+/// Long enough that a slow but real swarm still connects — a healthy one delivers in
+/// seconds — and short enough that a dead one is reported rather than waited on.
+const FIRST_BYTE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 async fn serve_file(
     State(bridge): State<Bridge>,
     AxumPath((id, index)): AxumPath<(usize, usize)>,
@@ -332,7 +338,52 @@ async fn serve_file(
             .map_err(|e| bad_request(format!("could not seek that file: {e}")))?;
     }
 
-    let body = Body::from_stream(ReaderStream::new(stream.take(length)));
+    // Read the first byte before answering, and give up if the swarm will not supply it.
+    //
+    // Without this the headers go out immediately — they come from the torrent's
+    // metadata, which arrives from peers that need hold none of the data — and the body
+    // then never fills. The download sits at zero for as long as anyone is willing to
+    // wait, which is what a swarm with no seeders looks like from the other end, and is
+    // indistinguishable from a bug here.
+    //
+    // A live swarm delivers the first bytes in seconds, so a minute is generous. What it
+    // buys is a real error instead of a hang.
+    let mut first = [0u8; 1];
+    let opening = tokio::time::timeout(FIRST_BYTE_TIMEOUT, stream.read_exact(&mut first)).await;
+    match opening {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => {
+            return Err(bad_request(format!("that file could not be read: {e}")));
+        }
+        Err(_) => {
+            let stats = handle.stats();
+            let peers = stats
+                .live
+                .as_ref()
+                .map(|live| {
+                    let p = &live.snapshot.peer_stats;
+                    format!(
+                        " {} peers were found and {} of them dropped the connection \
+                         without sending anything.",
+                        p.seen, p.dead
+                    )
+                })
+                .unwrap_or_default();
+            return Err(Failure(
+                StatusCode::GATEWAY_TIMEOUT,
+                format!(
+                    "No one is sharing this torrent. Its description came from peers that \
+                     hold no part of the file, so it can be listed but not downloaded.{peers}"
+                ),
+            ));
+        }
+    }
+
+    // The byte already read is put back in front of the rest, so the response is the
+    // whole range and not the range minus one.
+    let body = Body::from_stream(ReaderStream::new(
+        std::io::Cursor::new(first.to_vec()).chain(stream.take(length - 1)),
+    ));
     let mut response = Response::builder()
         .status(status)
         .header(header::ACCEPT_RANGES, "bytes")

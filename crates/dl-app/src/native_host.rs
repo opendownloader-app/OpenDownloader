@@ -68,17 +68,17 @@ fn write_message(value: &serde_json::Value) -> anyhow::Result<()> {
 /// anyone deciding to.
 pub async fn serve() -> anyhow::Result<()> {
     let mut server: Option<tokio::task::JoinHandle<()>> = None;
-    let mut port: Option<u16> = None;
+    let mut url: Option<String> = None;
 
     while let Some(message) = read_message()? {
         let kind = message.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match kind {
             "start" => {
-                if port.is_none() {
+                if url.is_none() {
                     match start_bridge().await {
-                        Ok((bound, handle)) => {
-                            port = Some(bound);
-                            server = Some(handle);
+                        Ok((found, handle)) => {
+                            url = Some(found);
+                            server = handle;
                         }
                         Err(e) => {
                             // Reported rather than returned: exiting here reaches the
@@ -92,7 +92,7 @@ pub async fn serve() -> anyhow::Result<()> {
                         }
                     }
                 }
-                write_message(&json!({ "ok": true, "port": port }))?;
+                write_message(&json!({ "ok": true, "url": url }))?;
             }
             other => {
                 write_message(&json!({
@@ -120,18 +120,19 @@ pub async fn serve() -> anyhow::Result<()> {
 /// So the shared folder is tried first, and a folder of this process's own is the
 /// fallback. One host is the common case and keeps everything in one place; more than one
 /// still works.
-async fn start_bridge() -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
-    let shared = super::torrent_folder();
-    std::fs::create_dir_all(&shared)?;
+async fn start_bridge() -> anyhow::Result<(String, Option<tokio::task::JoinHandle<()>>)> {
+    // One already running is the answer where there is one. A torrent session takes a
+    // lock on its folder *and* binds a DHT socket, and neither can be held twice — so a
+    // second session started while the app is open fails with "error initializing
+    // persistent DHT", which says nothing to anyone. Reusing what is there avoids the
+    // collision entirely and is what a user means by "the bridge".
+    if let Some(existing) = find_running_bridge().await {
+        return Ok((existing, None));
+    }
 
-    let bridge = match dl_torrent::router(&shared).await {
-        Ok(router) => router,
-        Err(_) => {
-            let own = shared.join(format!("host-{}", std::process::id()));
-            std::fs::create_dir_all(&own)?;
-            dl_torrent::router(&own).await?
-        }
-    };
+    let folder = super::torrent_folder();
+    std::fs::create_dir_all(&folder)?;
+    let bridge = dl_torrent::router(&folder).await?;
 
     let app = axum::Router::new()
         .nest("/relay", super::relay_router()?)
@@ -142,7 +143,39 @@ async fn start_bridge() -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let handle = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
-    Ok((port, handle))
+    Ok((
+        format!("http://127.0.0.1:{port}/torrent-bridge"),
+        Some(handle),
+    ))
+}
+
+/// A bridge already listening on this machine, if there is one.
+///
+/// Both shapes: the app serves everything on one port and mounts the bridge under a path,
+/// walking up from 5180 when that port is taken; the standalone binary sits on 8089 with
+/// no prefix.
+async fn find_running_bridge() -> Option<String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(400))
+        .build()
+        .ok()?;
+    let mut candidates = vec!["http://127.0.0.1:8089".to_string()];
+    candidates.extend((5180..5192).map(|p| format!("http://127.0.0.1:{p}/torrent-bridge")));
+
+    for base in candidates {
+        let Ok(response) = client.get(format!("{base}/healthz")).send().await else {
+            continue;
+        };
+        let Ok(body) = response.text().await else {
+            continue;
+        };
+        // Checked by name rather than by "something answered": these ports are ordinary
+        // and anything could be on them.
+        if body.contains("\"dl-torrent\"") {
+            return Some(base);
+        }
+    }
+    None
 }
 
 /// Where each browser reads native messaging host manifests from.
