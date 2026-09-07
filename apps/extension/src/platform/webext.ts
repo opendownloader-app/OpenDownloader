@@ -125,8 +125,59 @@ export const extensionPlatform: Platform = {
   },
 };
 
-/** Open the manager tab, focusing the existing one rather than opening a second. */
+/**
+ * How an extension page tells the others that the stored queue changed.
+ *
+ * A `BroadcastChannel` rather than `runtime.sendMessage`, for one reason: the popup is
+ * usually shouting into an empty room — there may be no manager tab open at all — and
+ * `sendMessage` rejects with "Could not establish connection" when nothing is
+ * listening, which would mean a caught-and-ignored error on the ordinary path. A
+ * channel with no subscribers is simply silent. Both pages are the same extension
+ * origin, so they share it.
+ */
+const JOBS_CHANGED = "opendownloader:jobs";
+
+/**
+ * Say that jobs were added or changed, for any manager tab already open.
+ *
+ * The queue lives in IndexedDB, which announces nothing when it is written. Without
+ * this a manager tab that was already open kept showing the list it had read at load —
+ * a video queued from the popup appeared only after a manual reload, and since nothing
+ * ticked the queue, it did not start either.
+ */
+export function announceJobsChanged(): void {
+  try {
+    const channel = new BroadcastChannel(JOBS_CHANGED);
+    channel.postMessage("changed");
+    channel.close();
+  } catch {
+    // Not worth failing a download over. The listener side also refreshes when the tab
+    // is focused, which covers this and is the same moment the user is looking.
+  }
+}
+
+/** Run `onChange` whenever another extension page announces a change to the queue. */
+export function onJobsChanged(onChange: () => void): void {
+  try {
+    new BroadcastChannel(JOBS_CHANGED).addEventListener("message", () =>
+      onChange(),
+    );
+  } catch {
+    // Same as above: focusing the tab is the backstop.
+  }
+}
+
+/**
+ * Open the manager tab, focusing the existing one rather than opening a second.
+ *
+ * The announcement is made here rather than at each of the half-dozen call sites,
+ * because every one of them reaches this for the same reason — something was just
+ * queued and the user is being sent to look at it. A tab that is being created reads
+ * the queue as it loads and ignores the message; one that was already open is the case
+ * this exists for.
+ */
 export async function openManagerTab(): Promise<void> {
+  announceJobsChanged();
   const url = ext.runtime.getURL("manager.html");
   const existing = await ext.tabs.query({ url });
   const first = existing[0];

@@ -99,12 +99,16 @@ export class Manager {
   private settings: Settings | null = null;
   private folderName: string | null = null;
   private folderNeedsPermission = false;
+  /** Whether the queue can open a file without asking, which is what lets it run alone. */
+  private canRunUnattended = true;
   private renderTimer: number | null = null;
   private renderPending = false;
 
   private readonly jobsEl = el("div", { class: "stack" });
   private readonly toolbarEl = el("div", { class: "toolbar" });
   private readonly emptyEl = el("div", { class: "card muted", hidden: true });
+  /** Why the queue is not running itself, shown above the jobs it is holding up. */
+  private readonly blockedEl = el("div", { class: "card stack", hidden: true });
   private readonly settingsBody = el("div", { class: "stack" });
 
   constructor(private readonly options: ManagerOptions) {
@@ -122,6 +126,19 @@ export class Manager {
 
   /** Load state and start the queue. Call once, after construction. */
   async start(): Promise<void> {
+    await this.refresh();
+    await this.queue.tick();
+  }
+
+  /**
+   * Re-read stored state, then let the queue run.
+   *
+   * The same two steps as {@link start}, for a host that has been told the jobs changed
+   * under it. The manager reads its queue from IndexedDB, which announces nothing — so
+   * a job added by the popup was invisible in an already-open manager tab until it was
+   * reloaded by hand, and because nothing ticked the queue, it also never started.
+   */
+  async sync(): Promise<void> {
     await this.refresh();
     await this.queue.tick();
   }
@@ -183,6 +200,7 @@ export class Manager {
       header,
       this.toolbarEl,
       settingsPanel,
+      this.blockedEl,
       this.emptyEl,
       this.jobsEl,
     );
@@ -325,8 +343,8 @@ export class Manager {
     this.settings = await getSettings();
     const folder = await getFolderHandle();
     this.folderName = folder?.name ?? null;
-    this.folderNeedsPermission =
-      Boolean(folder) && !(await canOpenSinkSilently());
+    this.canRunUnattended = await canOpenSinkSilently();
+    this.folderNeedsPermission = Boolean(folder) && !this.canRunUnattended;
     this.render();
   }
 
@@ -335,8 +353,74 @@ export class Manager {
   private render(): void {
     this.renderToolbar();
     this.renderSettings();
+    this.renderBlocked();
     this.emptyEl.hidden = this.jobs.length > 0;
     this.jobsEl.replaceChildren(...this.jobs.map((job) => this.renderJob(job)));
+  }
+
+  /**
+   * Why the queue is sitting still, said where the queue is.
+   *
+   * There are only two reasons a queued job does not start, and both were only
+   * explained inside the Settings panel — which is a collapsed `<details>`, so in
+   * practice they were not explained at all: a job clicked from the popup landed as
+   * "queued" beside a Start button, with nothing on screen saying what it was waiting
+   * for. Shown only when something is actually being held up, so it is a live
+   * explanation rather than a permanent warning.
+   */
+  private renderBlocked(): void {
+    const queued = this.jobs.filter((j) => j.status === "queued").length;
+    const autoStart = this.settings?.autoStart ?? true;
+    const held = queued > 0 && (!autoStart || !this.canRunUnattended);
+    this.blockedEl.hidden = !held;
+    if (!held) return;
+
+    const waiting =
+      queued === 1
+        ? "One download is waiting"
+        : `${queued} downloads are waiting`;
+
+    if (!autoStart) {
+      this.blockedEl.replaceChildren(
+        el("p", {
+          class: "muted hint",
+          text:
+            `${waiting} because starting them automatically is switched off. ` +
+            "Press Start on one, or turn it back on in Settings.",
+        }),
+      );
+      return;
+    }
+
+    // Auto-start is on, so the sink is what is missing. A save dialog can only be
+    // opened from a real click, which is why an unattended queue needs a folder.
+    this.blockedEl.replaceChildren(
+      el("p", {
+        class: "muted hint",
+        text: this.folderNeedsPermission
+          ? `${waiting} because this browser has forgotten its permission for ` +
+            `“${this.folderName}”. Granting it again lets them run on their own.`
+          : `${waiting} because no download folder is chosen. Without one the browser ` +
+            "has to ask where to save each file, and it will only ask on a click — so " +
+            "each download needs its Start button. Choose a folder once and they start " +
+            "by themselves.",
+      }),
+      el(
+        "div",
+        { class: "row wrap" },
+        this.folderNeedsPermission
+          ? el("button", {
+              class: "primary",
+              text: "Re-grant access",
+              onClick: () => void this.regrantFolder(),
+            })
+          : el("button", {
+              class: "primary",
+              text: "Choose download folder",
+              onClick: () => void this.chooseFolder(),
+            }),
+      ),
+    );
   }
 
   private renderToolbar(): void {
@@ -500,17 +584,26 @@ export class Manager {
       text: statusLine(job, progress),
     });
 
+    // The name owns a line of its own.
+    //
+    // It used to share one flex row with the badges, and lost: `.grow` carries
+    // `min-width: 0` so the name shrank to nothing, while a badge is `nowrap` and gave
+    // up not one pixel. A YouTube job showed as "Rust …" beside a badge spelling out
+    // "1080P · AVC · 711 KBPS + ARABIC · 131 KBPS · AAC" — the codec in full, and the
+    // video's name unreadable. The name is what identifies the row; the badges only
+    // describe it, so they go underneath and may wrap as far as they like.
     const name = el("div", {
-      class: "grow truncate",
-      title: job.url,
+      class: "job-name truncate",
+      // Both, because the visible text is the one that gets cut off.
+      title: `${job.filename}\n${job.url}`,
       text: job.filename,
     });
-    const head = el("div", { class: "row" }, name);
-    if (job.site) head.append(el("span", { class: "badge", text: job.site }));
+    const tags = el("div", { class: "row wrap job-tags" });
+    if (job.site) tags.append(el("span", { class: "badge", text: job.site }));
     if (job.kind === "hlsplaylist")
-      head.append(el("span", { class: "badge", text: "HLS" }));
+      tags.append(el("span", { class: "badge", text: "HLS" }));
     if (job.kind === "merge") {
-      head.append(
+      tags.append(
         el("span", {
           class: "badge",
           title:
@@ -523,17 +616,17 @@ export class Manager {
     // What was actually chosen, when the site offered a choice. Worth showing: two jobs
     // for one video differ only in this.
     if (job.quality)
-      head.append(el("span", { class: "badge", text: job.quality }));
+      tags.append(el("span", { class: "badge", text: job.quality }));
     if (job.audioOnly)
-      head.append(el("span", { class: "badge", text: "audio" }));
+      tags.append(el("span", { class: "badge", text: "audio" }));
     if (job.verification === "verified") {
-      head.append(el("span", { class: "badge ok", text: "verified" }));
+      tags.append(el("span", { class: "badge ok", text: "verified" }));
     }
     if (job.verification === "mismatch") {
-      head.append(el("span", { class: "badge bad", text: "hash mismatch" }));
+      tags.append(el("span", { class: "badge bad", text: "hash mismatch" }));
     }
-    head.append(status);
-    card.append(head);
+    tags.append(status);
+    card.append(name, tags);
 
     const total = progress?.total ?? job.totalBytes;
     const received = progress?.received ?? job.receivedBytes;

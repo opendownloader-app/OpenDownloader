@@ -30,7 +30,7 @@ import {
 } from "@opendownloader/engine";
 import { Manager, candidateForUrl, mountTools } from "@opendownloader/ui";
 
-import { extensionPlatform } from "../platform/webext";
+import { extensionPlatform, onJobsChanged } from "../platform/webext";
 
 // Test-only engine configuration, applied before anything can start a download.
 //
@@ -102,6 +102,17 @@ if (__OPENDOWNLOADER_E2E__) {
 }
 
 void manager.start();
+
+// Learn about jobs queued somewhere else — the popup, almost always.
+//
+// Two signals, because neither alone is enough. The announcement covers the case the
+// popup creates: it queues, then focuses this tab, which until now went on showing the
+// list it had read when it loaded. Becoming visible again is the backstop for anything
+// that queued without announcing, and it costs one read of an IndexedDB table.
+onJobsChanged(() => void manager.sync());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void manager.sync();
+});
 
 // A download in progress must survive an accidental tab close no worse than a
 // pause: the state is already persisted, so warn and let the user decide.

@@ -469,6 +469,22 @@ details.panel[open] > summary {
   }
 }
 
+/* ---------- a job in the queue ----------
+   The name is the row's identity and everything else describes it, so the name is set
+   at full width in the UI weight, and the badges sit under it in the caption size. The
+   two lines are what stop a long codec string from squeezing the title out of the row —
+   see the note in `renderJob`. */
+
+.job-name {
+  font: var(--type-ui);
+  color: var(--text-strong);
+}
+
+.job-tags {
+  gap: var(--space-2);
+  row-gap: var(--space-1);
+}
+
 /* ---------- indeterminate bar ----------
    For a wait with no percentage that would be true. Resolving a torrent is the case it
    was built for: the swarm answers when a peer answers, so a determinate bar would have
