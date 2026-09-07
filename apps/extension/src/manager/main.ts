@@ -133,6 +133,51 @@ const BRIDGE_CANDIDATES = [
   ),
 ];
 
+/**
+ * Ask the browser to start the bridge, and get back the port it is on.
+ *
+ * This is the arrangement with nothing to run: the app registers itself as a native
+ * messaging host when it is first opened, and from then on the *browser* starts the
+ * bridge on demand and stops it when this page lets go. The app itself need not be
+ * running, and nothing is typed anywhere.
+ *
+ * Returns null when no host is registered — the app has never been opened, or is not
+ * installed — so the caller falls back to looking for one already listening.
+ */
+async function startBridgeViaBrowser(): Promise<string | null> {
+  if (!chrome.runtime?.connectNative) return null;
+  return new Promise((resolve) => {
+    let port: chrome.runtime.Port;
+    try {
+      port = chrome.runtime.connectNative("app.opendownloader.bridge");
+    } catch {
+      return resolve(null);
+    }
+    // Held open deliberately: the host lives as long as this port does, so dropping it
+    // would stop the bridge in the middle of the download it was started for.
+    nativePort = port;
+
+    const settle = (value: string | null) => {
+      if (value === null && nativePort === port) nativePort = null;
+      resolve(value);
+    };
+    port.onMessage.addListener((message: { ok?: boolean; port?: number }) => {
+      settle(
+        message?.ok && message.port
+          ? `http://127.0.0.1:${message.port}/torrent-bridge`
+          : null,
+      );
+    });
+    port.onDisconnect.addListener(() => settle(null));
+    port.postMessage({ type: "start" });
+    // A host that is registered but broken would otherwise hang this forever.
+    setTimeout(() => settle(null), 4000);
+  });
+}
+
+/** Kept for the life of the page, because the bridge stops when this closes. */
+let nativePort: chrome.runtime.Port | null = null;
+
 /** The first bridge that answers, or null. Probed together so this costs one wait. */
 async function findBridge(): Promise<string | null> {
   const probes = BRIDGE_CANDIDATES.map(async (base) => {
@@ -161,7 +206,9 @@ async function addPastedLink(url: string): Promise<void> {
     return;
   }
 
-  const bridge = await findBridge();
+  // The browser-started host first: it needs nothing to be running. Falling back to a
+  // bridge already listening covers the app being open, or the standalone binary.
+  const bridge = (await startBridgeViaBrowser()) ?? (await findBridge());
   if (!bridge) {
     throw new Error(
       "A magnet names content on other people's machines, and a browser tab cannot " +

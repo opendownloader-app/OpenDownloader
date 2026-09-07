@@ -10,7 +10,8 @@
     "downloads",
     "tabs",
     "scripting",
-    "declarativeNetRequest"
+    "declarativeNetRequest",
+    "nativeMessaging"
   ],
   "optional_permissions": [
     "<all_urls>"

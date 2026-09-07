@@ -32,6 +32,8 @@ use std::path::PathBuf;
 use axum::Router;
 use rust_embed::RustEmbed;
 
+mod native_host;
+
 /// The built web app, baked into the binary so there is one file to ship.
 #[derive(RustEmbed)]
 #[folder = "../../apps/web/dist"]
@@ -43,6 +45,14 @@ fn torrent_folder() -> PathBuf {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Chrome starts a native messaging host with the calling extension's origin as an
+    // argument, and talks to it over stdin and stdout. Nothing may be printed in that
+    // mode — stdout *is* the protocol — and no browser window is opened, because the
+    // browser is already there and asking.
+    if std::env::args().any(|a| a.starts_with("chrome-extension://")) {
+        return native_host::serve().await;
+    }
+
     let folder = torrent_folder();
     std::fs::create_dir_all(&folder)?;
 
@@ -62,6 +72,13 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     let addr = listener.local_addr()?;
+    // Registering here rather than in an installer means opening the app once is the
+    // entire setup: from then on the extension can start the bridge by itself, and the
+    // app does not have to be running at all.
+    if let Err(e) = native_host::register() {
+        eprintln!("could not register the browser helper: {e}");
+    }
+
     let url = format!("http://{addr}/");
     println!("OpenDownloader is running at {url}");
     println!("Close this window to stop it.");

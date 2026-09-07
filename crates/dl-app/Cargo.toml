@@ -16,6 +16,7 @@ axum = { workspace = true }
 tokio = { workspace = true }
 tower-http = { workspace = true, features = ["fs", "cors"] }
 anyhow = { workspace = true }
+serde_json = { workspace = true }
 dl-relay = { path = "../dl-relay" }
 dl-torrent = { path = "../dl-torrent" }
 reqwest = { workspace = true }
