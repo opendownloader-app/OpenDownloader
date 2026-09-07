@@ -107,13 +107,33 @@ class Rate {
  * differently from GET (or reject it outright), and a `206` with a
  * `Content-Range` proves range support in a way `Accept-Ranges` alone does not.
  */
+/**
+ * What a failed response should be reported as.
+ *
+ * A status alone explains nothing — "server returned 409" is true and useless. Some of
+ * the things this talks to answer with a sentence saying what actually happened, and the
+ * local torrent bridge is one: a swarm with no seeders is not a fault anyone can fix, and
+ * the count of peers that dropped the connection is the fact that says so. So the body is
+ * used when it carries a message, and the status stands alone when it does not.
+ */
+async function failureFor(res: Response): Promise<Error> {
+  const fallback = `server returned ${res.status} ${res.statusText}`;
+  try {
+    const text = (await res.text()).slice(0, 2000);
+    const message = (JSON.parse(text) as { error?: string })?.error ?? null;
+    return new Error(message && message.length > 0 ? message : fallback);
+  } catch {
+    return new Error(fallback);
+  }
+}
+
 async function probe(url: string, signal?: AbortSignal): Promise<ProbeResult> {
   const res = await fetchWithRetry(url, {
     headers: { Range: "bytes=0-0" },
     signal,
   });
   if (!res.ok && res.status !== 206) {
-    throw new Error(`server returned ${res.status} ${res.statusText}`);
+    throw await failureFor(res);
   }
   // Drain so the connection can be reused rather than left dangling.
   await res.arrayBuffer();
@@ -281,7 +301,10 @@ async function runProgressive(
         }),
     });
     if (!res.ok && res.status !== 206) {
-      throw new Error(`chunk ${r.start} failed: ${res.status}`);
+      // The server's own sentence where it has one — a torrent bridge explains a dead
+      // swarm here, and "chunk 0 failed: 409" would throw that explanation away.
+      const why = await failureFor(res);
+      throw new Error(`chunk ${r.start} failed: ${why.message}`);
     }
     if (resuming && res.status === 200) {
       throw new Error("the file changed on the server; restart this download");
@@ -585,8 +608,9 @@ async function runHls(
         }),
     });
     if (!res.ok && res.status !== 206) {
+      const why = await failureFor(res);
       throw new Error(
-        `segment ${i + 1}/${resolved.segments.length} failed: ${res.status}`,
+        `segment ${i + 1}/${resolved.segments.length} failed: ${why.message}`,
       );
     }
     const raw = new Uint8Array(await res.arrayBuffer());

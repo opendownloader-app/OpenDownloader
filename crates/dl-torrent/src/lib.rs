@@ -369,8 +369,13 @@ async fn serve_file(
                     )
                 })
                 .unwrap_or_default();
+            // A 4xx, deliberately. The engine retries 5xx — correctly, since those are
+            // usually transient — and each retry would wait the full timeout again, so a
+            // dead swarm spent minutes looking like a slow download instead of failing.
+            // Nothing about this is transient: no amount of asking again produces a peer
+            // that has the data.
             return Err(Failure(
-                StatusCode::GATEWAY_TIMEOUT,
+                StatusCode::CONFLICT,
                 format!(
                     "No one is sharing this torrent. Its description came from peers that \
                      hold no part of the file, so it can be listed but not downloaded.{peers}"
