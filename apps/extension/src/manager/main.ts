@@ -212,8 +212,9 @@ async function addPastedLink(url: string): Promise<void> {
   if (!bridge) {
     throw new Error(
       "A magnet names content on other people's machines, and a browser tab cannot " +
-        "connect to them. The OpenDownloader app can, and this page will use it: " +
-        "install it, leave it running, and paste the link again.",
+        "connect to them. The OpenDownloader app can. Install it and open it once — " +
+        "that is all it needs; after that this page starts it by itself whenever a " +
+        "torrent is pasted, and it does not have to be running.",
     );
   }
 

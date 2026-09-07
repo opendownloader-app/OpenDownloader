@@ -140,8 +140,8 @@ pub fn peer_link_refusal(url: &str) -> Option<String> {
          by connecting to them directly. A browser tab cannot open those connections — \
          that limit is the tab's, and no permission or relay lifts it. The OpenDownloader \
          app can: it joins the swarm from this machine and serves each file inside the \
-         torrent to this page, so it downloads here like anything else. Install it, leave \
-         it running, and open this link again."
+         torrent to this page, so it downloads here like anything else. Install it and \
+         open it once — after that it starts on its own when a torrent needs it."
     ))
 }
 

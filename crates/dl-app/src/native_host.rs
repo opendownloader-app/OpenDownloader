@@ -165,16 +165,20 @@ fn manifest_dirs() -> Vec<PathBuf> {
 
 /// The extension ids allowed to start this host.
 ///
-/// An unpacked extension's id comes from the folder it was loaded from, so a development
-/// build and a store build are different ids and both belong here. Listing an id that is
-/// not installed costs nothing; omitting one means the extension is refused with a
-/// message about the host not being found, which reads like the app is missing.
+/// Discovered rather than hardcoded, because an unpacked extension's id is derived from
+/// the folder it was loaded from — so it differs between one machine and the next, and
+/// between a development copy and a store build. A host registered for the wrong id
+/// refuses the extension with "Access to the specified native messaging host is
+/// forbidden", which reads like the app being broken rather than a name mismatch.
+///
+/// So every Chromium profile is asked which extensions it has, and any whose path or name
+/// says OpenDownloader is allowed. A known id and an environment override are added on
+/// top, for a store build that is not installed here yet.
 fn allowed_origins() -> Vec<String> {
-    let mut ids = vec![
-        // The development build, loaded unpacked from apps/extension/dist.
-        "apiifoekhnpccalkflkmodllookaacjh".to_string(),
-    ];
-    // So a store id can be added without a rebuild.
+    let mut ids: Vec<String> = installed_extension_ids();
+
+    // The development build's usual id, for the case where nothing is installed yet.
+    ids.push("apiifoekhnpccalkflkmodllookaacjh".to_string());
     if let Ok(extra) = std::env::var("OPENDOWNLOADER_EXTENSION_IDS") {
         ids.extend(
             extra
@@ -183,9 +187,71 @@ fn allowed_origins() -> Vec<String> {
                 .filter(|s| !s.is_empty()),
         );
     }
+
+    ids.sort();
+    ids.dedup();
     ids.iter()
         .map(|id| format!("chrome-extension://{id}/"))
         .collect()
+}
+
+/// Extension ids that look like ours, from every Chromium profile on this machine.
+fn installed_extension_ids() -> Vec<String> {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return Vec::new();
+    };
+    let support = home.join("Library/Application Support");
+    let mut found = Vec::new();
+
+    for browser in [
+        "Google/Chrome",
+        "Google/Chrome Beta",
+        "Microsoft Edge",
+        "BraveSoftware/Brave-Browser",
+        "Chromium",
+    ] {
+        let Ok(profiles) = std::fs::read_dir(support.join(browser)) else {
+            continue;
+        };
+        for profile in profiles.filter_map(Result::ok) {
+            // Both files are read: an unpacked extension is usually in `Secure
+            // Preferences`, and which one holds it is not worth predicting.
+            for name in ["Secure Preferences", "Preferences"] {
+                let path = profile.path().join(name);
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    continue;
+                };
+                let Some(settings) = json
+                    .pointer("/extensions/settings")
+                    .and_then(|v| v.as_object())
+                else {
+                    continue;
+                };
+                for (id, entry) in settings {
+                    // The path is the reliable marker: an unpacked extension's cached
+                    // manifest name is often empty, as it is on the machine this was
+                    // written for.
+                    let where_from = entry
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    let called = entry
+                        .pointer("/manifest/name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    if where_from.contains("opendownloader") || called.contains("opendownloader") {
+                        found.push(id.clone());
+                    }
+                }
+            }
+        }
+    }
+    found
 }
 
 /// Register this binary as the browser's helper, for every Chromium browser installed.
