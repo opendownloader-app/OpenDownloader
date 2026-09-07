@@ -123,8 +123,12 @@ window.addEventListener("beforeunload", (e) => {
  */
 const BRIDGE_CANDIDATES = [
   "http://127.0.0.1:8089",
+  // The same span the app itself walks when its preferred port is taken. Five was not
+  // enough: with two stale servers holding 5180 and 5181 the app landed on 5182, and one
+  // more collision would have put it past the end of this list. A probe range narrower
+  // than where the app can be is a bridge that is running and not found.
   ...Array.from(
-    { length: 5 },
+    { length: 12 },
     (_, i) => `http://127.0.0.1:${5180 + i}/torrent-bridge`,
   ),
 ];
