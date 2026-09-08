@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="OpenDownloader">
   <!-- The family tile: same 24-grid, same 5.5 radius, same near-black ground as the
-       other OpenApps marks. Only the accent changes from product to product, and this
+       other marks in the family. Only the accent changes from product to product, and this
        one's is the blue its own tokens already claim. -->
   <rect width="24" height="24" rx="5.5" fill="#111111"/>
   <!-- A play triangle turned to point down, over the line it lands on: the video, and
