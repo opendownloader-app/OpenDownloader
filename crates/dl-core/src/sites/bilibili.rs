@@ -480,6 +480,9 @@ pub struct Bilibili {
     /// Set once the watch page came back without a manifest in it, so the next body fed
     /// back is the player API's answer rather than more HTML.
     awaiting_playurl: bool,
+    /// The bvid, while the `pagelist` hop is out fetching the `cid` to go with it. Only
+    /// set when the page itself no longer carries one.
+    awaiting_pagelist: Option<String>,
     /// The page's own title, carried across the extra hop: the API answer has no title
     /// in it, only streams.
     title: Option<String>,
@@ -514,6 +517,17 @@ impl Extractor for Bilibili {
             return Ok(Step::Done(parse_playurl(body, title)?));
         }
 
+        // The `cid` this page would not give up. Checked before the HTML branches below,
+        // because what comes back here is JSON and would fail every one of them.
+        if let Some(bvid) = self.awaiting_pagelist.take() {
+            let cid = parse_pagelist(body).ok_or_else(shape)?;
+            self.awaiting_playurl = true;
+            return Ok(Step::Need(Need::Fetch(vec![playurl_request(&VideoIds {
+                bvid,
+                cid,
+            })])));
+        }
+
         // Read from the tab the player is in, the page carries the manifest inline and it
         // is the better answer: it is whatever that session is entitled to, which for a
         // logged-in viewer is the high renditions.
@@ -527,10 +541,22 @@ impl Extractor for Bilibili {
         // What the page does carry is the pair of ids the player would have asked with,
         // so ask with them. Anonymous callers are capped at the lower renditions, which
         // is a smaller loss than refusing the link outright.
-        let ids = video_ids(body).ok_or_else(shape)?;
         self.title = Some(page_title(body, &self.page_url));
-        self.awaiting_playurl = true;
-        Ok(Step::Need(Need::Fetch(vec![playurl_request(&ids)])))
+
+        // Both ids in the page: ask the player API and be done in one more hop.
+        if let Some(ids) = video_ids(body) {
+            self.awaiting_playurl = true;
+            return Ok(Step::Need(Need::Fetch(vec![playurl_request(&ids)])));
+        }
+
+        // Only the bvid. `videoData` is now served as a stub — `owner` and `stat`, with
+        // both ids absent — and the page fills itself in after load, so a fetched copy
+        // never has the `cid` the player API cannot work without. One more hop asks for
+        // it. Before this, the missing `cid` surfaced as "the site has probably changed",
+        // which was true and unhelpful in equal measure.
+        let bvid = page_bvid(body, &self.page_url).ok_or_else(shape)?;
+        self.awaiting_pagelist = Some(bvid.clone());
+        Ok(Step::Need(Need::Fetch(vec![pagelist_request(&bvid)])))
     }
 
     /// Yes: a fetched page still carries `__INITIAL_STATE__`, and the ids in it are
@@ -553,20 +579,82 @@ pub struct VideoIds {
 /// per part, and asking with the wrong one returns a different part's audio. This reads
 /// `videoData.cid`, which is the part the URL actually addresses.
 pub fn video_ids(html: &str) -> Option<VideoIds> {
-    let state = json_object_assigned_to(html, "window.__INITIAL_STATE__")?;
-    let root: Value = serde_json::from_str(state).ok()?;
+    let root = initial_state(html)?;
     let video = root.get("videoData")?;
-    let bvid = video.get("bvid")?.as_str()?.to_string();
-    // Serialised as a number, and large enough that a float round-trip would corrupt it.
-    let cid = match video.get("cid")? {
+    let bvid = id_string(video.get("bvid")?)?;
+    let cid = id_string(video.get("cid")?)?;
+    Some(VideoIds { bvid, cid })
+}
+
+/// `window.__INITIAL_STATE__`, parsed.
+fn initial_state(html: &str) -> Option<Value> {
+    serde_json::from_str(json_object_assigned_to(html, "window.__INITIAL_STATE__")?).ok()
+}
+
+/// A bvid or cid, however this page happens to have serialised it.
+///
+/// A cid is a number and large enough that a float round-trip would corrupt it, so it is
+/// read from the token rather than through `as_u64`.
+fn id_string(value: &Value) -> Option<String> {
+    let text = match value {
         Value::Number(n) => n.to_string(),
         Value::String(t) => t.clone(),
         _ => return None,
     };
-    if bvid.is_empty() || cid.is_empty() {
-        return None;
+    (!text.is_empty()).then_some(text)
+}
+
+/// The bvid, from wherever this page still keeps it.
+///
+/// `videoData` used to hold both ids and now arrives as a stub — `owner` and `stat`, with
+/// `bvid` and `cid` both absent — because the page hydrates itself after load. The bvid
+/// survives at the root of the same object, and failing that it is in the URL, which is
+/// where it came from in the first place and cannot go stale.
+pub fn page_bvid(html: &str, page_url: &str) -> Option<String> {
+    // A watch page or nothing. The URL is a fine source for the id, but only once this
+    // body has proved it is the page it claims to be — reaching for the URL whenever the
+    // HTML is unreadable would turn "I could not read that page" into an API call and a
+    // vaguer failure one hop later.
+    let root = initial_state(html)?;
+    root.get("bvid")
+        .and_then(id_string)
+        .or_else(|| root.get("videoData")?.get("bvid").and_then(id_string))
+        .or_else(|| bvid_in_url(page_url))
+}
+
+/// The `BV…` id out of a watch URL.
+fn bvid_in_url(url: &str) -> Option<String> {
+    let rest = url.split("/video/").nth(1)?;
+    let id: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric())
+        .collect();
+    (id.len() > 2 && id.starts_with("BV")).then_some(id)
+}
+
+/// Ask which parts this video has, to learn the `cid` of the first.
+///
+/// `x/player/pagelist` rather than `x/web-interface/view`, which is the endpoint that
+/// would also carry the title: `view` refuses a server outright — it answers `412` to a
+/// browser User-Agent and its own `-404` to anything else — while `pagelist` answers both
+/// shapes. The title is already in hand from the page, so `view` buys nothing here.
+pub fn pagelist_request(bvid: &str) -> Request {
+    Request {
+        url: format!("https://api.bilibili.com/x/player/pagelist?bvid={bvid}"),
+        method: "GET".to_string(),
+        headers: headers(),
+        body: None,
     }
-    Some(VideoIds { bvid, cid })
+}
+
+/// The first part's `cid`, from a `pagelist` answer.
+pub fn parse_pagelist(body: &str) -> Option<String> {
+    let root: Value = serde_json::from_str(body).ok()?;
+    root.get("data")?
+        .as_array()?
+        .first()?
+        .get("cid")
+        .and_then(id_string)
 }
 
 /// The player's own manifest request.
@@ -1609,6 +1697,79 @@ mod tests {
         let html = r#"<script>window.__playinfo__={"data":{"drm":false,"dash":{"video":[{"id":80,"baseUrl":"https://x/y.m4s","height":1080}],"audio":[]}}}</script>"#;
         let x = extract(html);
         assert_eq!(x.options.len(), 1);
+    }
+
+    /// The shape bilibili actually serves now, captured 8 September 2026.
+    ///
+    /// `videoData` arrives as a stub — `owner` and `stat`, both ids gone — because the
+    /// page hydrates itself after load, so a fetched copy never carries the `cid`. The
+    /// bvid survives at the root. Before the `pagelist` hop this produced "the site has
+    /// probably changed", which was accurate and no help to anyone.
+    #[test]
+    fn a_watch_page_whose_video_data_is_a_stub_asks_the_pagelist_api_for_the_cid() {
+        let page = r#"<script>window.__INITIAL_STATE__={"bvid":"BV1GJ411x7h7",
+            "videoData":{"owner":{"name":"someone"},"stat":{"view":1}}};</script>"#;
+        let mut e = Bilibili::new();
+        e.start("https://www.bilibili.com/video/BV1GJ411x7h7")
+            .unwrap();
+
+        let Step::Need(Need::Fetch(requests)) = e.feed(&[page]).unwrap() else {
+            panic!("a page with no cid must ask for one");
+        };
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0]
+                .url
+                .contains("x/player/pagelist?bvid=BV1GJ411x7h7"),
+            "{}",
+            requests[0].url
+        );
+
+        // The cid comes back, and only then is the player API asked.
+        let Step::Need(Need::Fetch(requests)) = e
+            .feed(&[r#"{"code":0,"data":[{"cid":137649199,"page":1}]}"#])
+            .unwrap()
+        else {
+            panic!("the cid must lead to the player API");
+        };
+        assert!(
+            requests[0].url.contains("bvid=BV1GJ411x7h7")
+                && requests[0].url.contains("cid=137649199"),
+            "{}",
+            requests[0].url
+        );
+    }
+
+    /// A page that still carries both ids must not spend the extra hop.
+    #[test]
+    fn a_watch_page_that_still_has_both_ids_goes_straight_to_the_player_api() {
+        let page = r#"<script>window.__INITIAL_STATE__={
+            "videoData":{"bvid":"BV1GJ411x7h7","cid":137649199}};</script>"#;
+        let mut e = Bilibili::new();
+        e.start("https://www.bilibili.com/video/BV1GJ411x7h7")
+            .unwrap();
+        let Step::Need(Need::Fetch(requests)) = e.feed(&[page]).unwrap() else {
+            panic!("expected the player API");
+        };
+        assert!(
+            requests[0].url.contains("x/player/playurl"),
+            "{}",
+            requests[0].url
+        );
+    }
+
+    #[test]
+    fn a_pagelist_answer_with_no_parts_in_it_reports_shape() {
+        let page = r#"<script>window.__INITIAL_STATE__={"bvid":"BV1GJ411x7h7",
+            "videoData":{"owner":{}}};</script>"#;
+        let mut e = Bilibili::new();
+        e.start("https://www.bilibili.com/video/BV1GJ411x7h7")
+            .unwrap();
+        e.feed(&[page]).unwrap();
+        assert!(matches!(
+            e.feed(&[r#"{"code":0,"data":[]}"#]),
+            Err(SiteError::Shape(_))
+        ));
     }
 
     #[test]
