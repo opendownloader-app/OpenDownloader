@@ -71,6 +71,10 @@ const statusEl = document.getElementById("url-status") as HTMLParagraphElement;
 // The bar above the status line, and the schedule of what to say while it sweeps. The
 // paragraph is passed in rather than created, because everything on this page already
 // writes its result there.
+/** Where every build is published. The only address the app points people at. */
+const RELEASES_URL =
+  "https://github.com/opendownloader-app/opendownloader/releases";
+
 const openTorrentButton = document.getElementById(
   "open-torrent",
 ) as HTMLButtonElement | null;
@@ -1154,21 +1158,14 @@ async function add(): Promise<void> {
     // The one refusal with somewhere to send you. Rendered with the store links rather
     // than a sentence describing them.
     if (e instanceof SiteNeedsExtension) {
-      statusEl.replaceChildren(
-        document.createTextNode(message + " "),
-        ...(
-          [
-            ["Chrome", "https://chromewebstore.google.com/"],
-            ["Edge", "https://microsoftedge.microsoft.com/addons"],
-            ["Firefox", "https://addons.mozilla.org/"],
-          ] as [string, string][]
-        ).flatMap(([label, href], i) => {
-          const a = document.createElement("a");
-          a.href = href;
-          a.textContent = label;
-          return i === 0 ? [a] : [document.createTextNode(" · "), a];
-        }),
-      );
+      // One link to the builds, not three to store front pages. Nothing has been
+      // submitted to a store, so those sent people to a search box for a listing that
+      // does not exist.
+      const link = document.createElement("a");
+      link.href = RELEASES_URL;
+      link.rel = "noopener";
+      link.textContent = "Get the extension";
+      statusEl.replaceChildren(document.createTextNode(message + " "), link);
       return;
     }
     // Two shapes of the same problem: the site answered 403, or the browser refused to

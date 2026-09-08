@@ -165,6 +165,24 @@
         color: var(--accent-text);
         text-underline-offset: 2px;
       }
+      /* The one link on the page that is a call to action rather than prose. Matches
+         `button.primary` in base.css, because it sits where a button would. */
+      a.cta {
+        display: inline-flex;
+        align-items: center;
+        height: var(--control-h-md, 36px);
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-md);
+        background: var(--accent);
+        color: var(--text-inverse);
+        font: var(--type-ui);
+        text-decoration: none;
+        transition: var(--transition-control);
+      }
+      a.cta:hover {
+        color: var(--text-inverse);
+        filter: brightness(1.06);
+      }
       a:hover {
         color: var(--text-link-hover);
       }
@@ -354,29 +372,33 @@
         you are on and offers what it finds, one site at a time and only where
         you turn it on. It is the same engine and it is equally free.
       </p>
+      <!-- One link, to where the builds actually are. These were three links to the
+           front pages of the Chrome, Edge and Firefox stores — not to listings, because
+           there are none: nothing has been submitted. Each one dropped the reader on a
+           search box with no idea what to search for. -->
       <p class="row wrap">
         <a
-          id="chrome-link"
-          href="https://chromewebstore.google.com/"
+          id="get-extension"
+          class="cta"
+          href="https://github.com/opendownloader-app/opendownloader/releases"
           rel="noopener"
-          >Chrome</a
+          >Get the extension</a
         >
-        <a
-          id="edge-link"
-          href="https://microsoftedge.microsoft.com/addons"
-          rel="noopener"
-          >Edge</a
-        >
-        <a id="firefox-link" href="https://addons.mozilla.org/" rel="noopener"
-          >Firefox</a
-        >
+      </p>
+      <p class="muted" style="max-width: 62ch">
+        Chrome, Edge and Firefox builds are attached to the latest release.
+        Download the one for your browser, unzip it, and load it from the
+        browser's own extensions page — it is not in the stores yet, so there is
+        nothing to search for.
       </p>
     </section>
 
     <footer>
       <p>
         OpenDownloader is open source under MIT or Apache-2.0.
-        <a href="https://github.com/opentoolkitsg/opendownloader" rel="noopener"
+        <a
+          href="https://github.com/opendownloader-app/opendownloader"
+          rel="noopener"
           >Read the code</a
         >. Nothing here is metered, and there is no paid tier to upgrade to.
       </p>
