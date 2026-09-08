@@ -122,6 +122,7 @@ impl Extractor for Weixin {
                 let direct = urls_containing(body, "mpvideo.qpic.cn");
                 if !direct.is_empty() {
                     let mut extraction = Extraction {
+                        note: None,
                         site: SITE.to_string(),
                         title: self.title.clone(),
                         options: direct_options(&direct, &self.title),
@@ -333,6 +334,7 @@ pub fn parse_play_url(body: &str, title: &str) -> Result<Extraction, SiteError> 
     }
     options.sort_by_key(|o| std::cmp::Reverse(o.rank));
     let mut extraction = Extraction {
+        note: None,
         site: SITE.to_string(),
         title: title.to_string(),
         options,

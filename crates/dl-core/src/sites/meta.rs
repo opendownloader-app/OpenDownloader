@@ -241,6 +241,7 @@ pub fn parse_post_page(
     options.sort_by_key(|o| std::cmp::Reverse(o.rank));
 
     let mut extraction = Extraction {
+        note: None,
         site: site.to_string(),
         title,
         options,
@@ -471,6 +472,7 @@ fn facebook_dash_extraction(html: &str, site: &'static str, referer: &str) -> Op
         .unwrap_or_default();
 
     let mut extraction = Extraction {
+        note: None,
         site: site.to_string(),
         title,
         options,

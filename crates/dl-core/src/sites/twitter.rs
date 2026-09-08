@@ -240,6 +240,7 @@ fn parse(root: &Value, status_id: Option<&str>) -> Result<Extraction, SiteError>
     options.sort_by_key(|o| std::cmp::Reverse(o.rank));
 
     let mut extraction = Extraction {
+        note: None,
         site: "X".into(),
         title,
         options,

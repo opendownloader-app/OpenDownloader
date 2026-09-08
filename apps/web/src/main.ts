@@ -878,6 +878,15 @@ function renderChoices(extraction: Extraction, pageUrl: string): void {
   heading.textContent = extraction.title;
   siteOptionsEl.append(heading);
 
+  // Why the best entry below is lower than the site's own page offers. Without it the
+  // menu is correct and complete and reads as broken.
+  if (extraction.note) {
+    const note = document.createElement("p");
+    note.className = "muted hint warn";
+    note.textContent = extraction.note;
+    siteOptionsEl.append(note);
+  }
+
   const queue = (option: MediaOption) =>
     void queueOption(extraction.site, option, pageUrl).then(() => {
       siteOptionsEl.hidden = true;

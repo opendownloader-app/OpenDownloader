@@ -170,6 +170,7 @@ impl Extractor for Generic {
         }
 
         let mut extraction = Extraction {
+            note: None,
             site: "video page".into(),
             title,
             options,

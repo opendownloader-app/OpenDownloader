@@ -308,6 +308,7 @@ fn parse_config(root: &Value, id: Option<&str>) -> Result<Extraction, SiteError>
     options.sort_by_key(|o| core::cmp::Reverse(o.rank));
 
     let mut extraction = Extraction {
+        note: None,
         site: "Vimeo".into(),
         title,
         options,

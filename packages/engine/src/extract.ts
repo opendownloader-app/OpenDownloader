@@ -87,6 +87,14 @@ export interface Extraction {
   /** Every audio rendition, best first. Empty when the site muxes its audio in. */
   audios: AudioChoice[];
   subtitles: ExtractedSubtitle[];
+  /**
+   * Something true about this result that the rendition list does not say.
+   *
+   * Bilibili is the case it exists for: it advertises every quality a video has, then
+   * serves a signed-out caller only the lowest, so a correct and complete menu still
+   * looks broken because the advertised 1080p is not in it.
+   */
+  note?: string | null;
 }
 
 /**

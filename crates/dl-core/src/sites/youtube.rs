@@ -588,6 +588,7 @@ fn parse_player_response(root: &Value, id: Option<&str>) -> Result<Extraction, S
     options.sort_by_key(|o| core::cmp::Reverse(o.rank));
 
     let mut extraction = Extraction {
+        note: None,
         site: "YouTube".into(),
         title,
         options,

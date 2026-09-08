@@ -342,6 +342,7 @@ fn parse_clip_response(root: &Value, slug: Option<&str>) -> Result<Extraction, S
     options.sort_by_key(|o| core::cmp::Reverse(o.rank));
 
     let mut extraction = Extraction {
+        note: None,
         site: "Twitch".into(),
         title,
         options,

@@ -111,6 +111,7 @@ pub fn parse_video_page(html: &str, page_url: &str) -> Result<Extraction, SiteEr
         return Err(unavailable(None));
     }
     let mut extraction = Extraction {
+        note: None,
         site: SITE.to_string(),
         title,
         options: media.options,

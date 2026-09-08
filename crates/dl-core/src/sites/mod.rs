@@ -224,7 +224,7 @@ pub struct AudioChoice {
 }
 
 /// Everything an extractor learned.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Extraction {
     pub site: String,
     pub title: String,
@@ -243,6 +243,15 @@ pub struct Extraction {
     /// Subtitle tracks the site exposes, if any.
     #[serde(default)]
     pub subtitles: Vec<SubtitleTrack>,
+    /// Something true about this result that the list of renditions does not say.
+    ///
+    /// For the case it was added for: bilibili publishes `accept_quality` naming every
+    /// rendition a video *has*, then serves a signed-out caller only the lowest two. The
+    /// menu is then correct and complete and still looks broken, because the 1080p the
+    /// site advertises is not in it. A UI that shows this says why; one that ignores it
+    /// is no worse off than before.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 impl Extraction {
@@ -819,6 +828,7 @@ mod tests {
         let mut extraction = Extraction {
             site: "test".into(),
             title: "t".into(),
+            note: None,
             options: Vec::new(),
             // Deliberately worst-first, which is what a naive extractor produces.
             videos: vec![choice("a", 360), choice("b", 1080), choice("c", 720)],

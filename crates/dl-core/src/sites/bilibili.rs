@@ -755,6 +755,7 @@ fn extraction_from_manifest(manifest: &str, title: String) -> Result<Extraction,
         return Err(shape());
     }
     let mut extraction = Extraction {
+        note: None,
         site: SITE.to_string(),
         title,
         options,
@@ -762,10 +763,46 @@ fn extraction_from_manifest(manifest: &str, title: String) -> Result<Extraction,
         audios,
         subtitles: Vec::new(),
     };
+    extraction.note = withheld_note(data);
     // Ordering and the single `best` flag are decided in one place for every site, so
     // "best" cannot come to mean two things — see [`Extraction::rank_choices`].
     extraction.rank_choices();
     Ok(extraction)
+}
+
+/// What bilibili says this video has, set against what it just handed over.
+///
+/// `accept_quality` lists every rendition the video exists in and `quality` is the one
+/// served. A signed-out request gets the lowest — 480p on a video that also exists in
+/// 1080p — and asking for more with `qn` changes nothing, which is the point: it is an
+/// account gate, not a parameter. Without this the menu is correct, complete, and looks
+/// broken, because the resolution the site itself advertises is missing from it.
+fn withheld_note(data: &Value) -> Option<String> {
+    let accepted: Vec<i64> = data
+        .get("accept_quality")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_i64)
+        .collect();
+    let served = data.get("quality").and_then(Value::as_i64)?;
+    let best = accepted.iter().copied().max()?;
+    if best <= served {
+        return None;
+    }
+    // `accept_description` runs parallel to `accept_quality`, best first, and holds
+    // bilibili's own name for each — which is what the viewer sees on bilibili itself.
+    let index = accepted.iter().position(|q| *q == best)?;
+    let name = data
+        .get("accept_description")?
+        .as_array()?
+        .get(index)?
+        .as_str()?
+        .trim();
+    Some(format!(
+        "Bilibili lists “{name}” for this video but serves only its lower renditions to a \
+         signed-out request. Sign in to Bilibili in your browser and use the OpenDownloader \
+         extension on the video's own page to get what your account is entitled to."
+    ))
 }
 
 /// True when the manifest marks anything as protected.
@@ -1697,6 +1734,37 @@ mod tests {
         let html = r#"<script>window.__playinfo__={"data":{"drm":false,"dash":{"video":[{"id":80,"baseUrl":"https://x/y.m4s","height":1080}],"audio":[]}}}</script>"#;
         let x = extract(html);
         assert_eq!(x.options.len(), 1);
+    }
+
+    /// Measured 8 September 2026: `accept_quality` advertises 1080P+ down to 360P and
+    /// the signed-out answer carries only 480P and 360P. `qn=80` and `qn=112` change
+    /// nothing, which is what makes it an account gate rather than a parameter.
+    #[test]
+    fn a_signed_out_answer_says_which_renditions_bilibili_kept_back() {
+        let manifest = r#"{"code":0,"data":{"quality":32,
+            "accept_quality":[112,80,64,32,16],
+            "accept_description":["高清 1080P+","高清 1080P","高清 720P","清晰 480P","流畅 360P"],
+            "dash":{"video":[{"id":32,"baseUrl":"https://x/v.m4s","height":480,
+                              "codecs":"avc1.64001F"}],
+                    "audio":[{"id":30280,"baseUrl":"https://x/a.m4s"}]}}}"#;
+        let x = parse_playurl(manifest, "t".into()).unwrap();
+        let note = x.note.expect("a capped answer must say so");
+        assert!(note.contains("1080P+"), "{note}");
+        assert!(
+            note.contains("extension"),
+            "names the way to get it: {note}"
+        );
+    }
+
+    /// Nothing withheld, nothing said. A note on every result would be noise.
+    #[test]
+    fn an_answer_that_carries_the_best_rendition_says_nothing() {
+        let manifest = r#"{"code":0,"data":{"quality":80,
+            "accept_quality":[80,32],"accept_description":["高清 1080P","清晰 480P"],
+            "dash":{"video":[{"id":80,"baseUrl":"https://x/v.m4s","height":1080,
+                              "codecs":"avc1.64001F"}],
+                    "audio":[{"id":30280,"baseUrl":"https://x/a.m4s"}]}}}"#;
+        assert_eq!(parse_playurl(manifest, "t".into()).unwrap().note, None);
     }
 
     /// The shape bilibili actually serves now, captured 8 September 2026.

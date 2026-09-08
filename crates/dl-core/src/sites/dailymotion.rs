@@ -282,6 +282,7 @@ fn parse_metadata(root: &Value, id: Option<&str>) -> Result<Extraction, SiteErro
     }
 
     let mut extraction = Extraction {
+        note: None,
         site: "Dailymotion".into(),
         title,
         options,
