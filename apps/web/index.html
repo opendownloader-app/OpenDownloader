@@ -167,6 +167,42 @@
       }
       /* The one link on the page that is a call to action rather than prose. Matches
          `button.primary` in base.css, because it sits where a button would. */
+      /* The primary action, made to look like one. The input, what it accepts, the
+         result and the .torrent side-door are one object rather than four things that
+         happened to be stacked in the same order they were built in. */
+      .workbench {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        padding: var(--space-5);
+      }
+      .eyebrow {
+        font: var(--weight-medium) var(--text-2xs) / 1 var(--font-sans);
+        letter-spacing: var(--tracking-caps);
+        text-transform: uppercase;
+        color: var(--text-faint);
+      }
+      /* Sits under the box and carries the answer to "what can I put in here?", which
+         was previously a paragraph below the whole section that read as body copy. */
+      .hint-inline {
+        margin: 0;
+        font-size: var(--text-sm);
+        line-height: 1.5;
+        max-width: 70ch;
+      }
+      .hint-inline b {
+        font-weight: var(--weight-medium);
+        color: var(--text-body);
+      }
+      /* A different way in, not a second Download button. The rule separates it so the
+         eye stops at the primary path first. */
+      .alt-route {
+        align-items: center;
+        gap: var(--space-2);
+        padding-top: var(--space-3);
+        border-top: var(--border-width) solid var(--border-hairline);
+        font-size: var(--text-sm);
+      }
       a.cta {
         display: inline-flex;
         align-items: center;
@@ -289,72 +325,69 @@
       </div>
       <h1>Save a video from a web page to your computer</h1>
       <p class="lead">
-        Paste the link to a video, audio file or stream and it is saved to your
-        computer. Interrupted downloads pick up where they stopped, and every
-        finished file is checked with a SHA-256 digest read back off disk.
-      </p>
-      <p class="lead">
-        Every feature is free and nothing is uploaded: the download runs in this
-        tab, on your machine. An account is optional — it carries credits to our
-        other apps, and nothing here needs one.
+        Paste a link and it is saved to your computer. The download runs in this
+        tab, on your machine — nothing is uploaded, an interrupted file picks up
+        where it stopped, and every finished one is checked against a SHA-256
+        digest read back off disk.
       </p>
     </header>
 
-    <section>
-      <div class="row" style="gap: 10px">
-        <input
-          id="url"
-          class="grow"
-          type="url"
-          spellcheck="false"
-          placeholder="https://example.com/lecture.mp4 or …/stream.m3u8"
-          aria-label="Link to download"
-        />
-        <button id="go" class="primary">Download</button>
-        <!-- A torrent usually arrives as a file, not a link, and a file cannot be typed
-             into the box beside this. The input is hidden because the browser's own file
-             control cannot be styled to sit in a row of the product's own buttons. -->
-        <button id="open-torrent" type="button">Open .torrent</button>
-        <input
-          id="torrent-file"
-          type="file"
-          accept=".torrent,application/x-bittorrent"
-          hidden
-        />
-      </div>
-      <!-- The wait bar is inserted here by the script, above the status line: a torrent
-           has to find the app, then the swarm, then a peer willing to name its files,
-           and none of that has a percentage that would be true. -->
-      <p
-        id="url-status"
-        class="muted"
-        role="status"
-        aria-live="polite"
-        style="margin: 8px 0 0"
-      ></p>
-      <div
-        id="site-options"
-        class="stack"
-        style="margin-top: 10px"
-        hidden
-      ></div>
-      <p class="muted" style="margin: 6px 0 0">
-        A direct link to a file or an <code>.m3u8</code> playlist, or a video
-        page on a supported platform. Services whose media is DRM-protected are
-        refused, in code, and so is any encrypted stream anywhere.
-      </p>
-    </section>
+    <!-- The one thing this page is for, in one card, with what it accepts said next to
+         the box rather than in a paragraph underneath it. Everything below is either the
+         result of using it or reference material, in that order — the page had grown into
+         a flat stack where the catalogue of sites sat above your own downloads. -->
+    <section id="add">
+      <div class="card workbench">
+        <label class="eyebrow" for="url">Paste a link</label>
+        <div class="row" style="gap: var(--space-2)">
+          <input
+            id="url"
+            class="grow"
+            type="url"
+            spellcheck="false"
+            placeholder="A video page, a direct file, or a magnet link"
+            aria-label="Link to download"
+            aria-describedby="url-help"
+          />
+          <button id="go" class="primary">Download</button>
+        </div>
 
-    <section id="sites">
-      <h2>Sites it knows</h2>
-      <p class="muted" style="margin: 0 0 var(--space-5)">
-        Any direct link to a media file or a playlist works anywhere. These have
-        extractors of their own, so pasting a page link is enough — and the ones
-        marked need the extension, because a web page is not allowed to read
-        another site's page. The last few are link kinds rather than websites;
-        those marked need a helper running on your own machine.
-      </p>
-      <div id="site-list" class="sites"></div>
+        <p id="url-help" class="muted hint-inline">
+          A video page on <b>YouTube</b>, <b>Bilibili</b>, <b>Vimeo</b>,
+          <b>Dailymotion</b>, <b>Twitch</b> or <b>X</b> — or a direct file link,
+          an <code>.m3u8</code> playlist, a <b>magnet</b> link, or a
+          <b>Mega</b>, <b>Quark</b> or <b>eD2k</b> share.
+          <a href="#sites">See everything it knows</a>
+        </p>
+
+        <!-- The wait bar is inserted here by the script, above the status line: a torrent
+             has to find the app, then the swarm, then a peer willing to name its files,
+             and none of that has a percentage that would be true. -->
+        <p
+          id="url-status"
+          class="muted"
+          role="status"
+          aria-live="polite"
+          style="margin: 0"
+        ></p>
+        <div id="site-options" class="stack" hidden></div>
+
+        <!-- A torrent usually arrives as a file, not a link, and a file cannot be typed
+             into the box above. It sat as a second button beside Download, which read as
+             two equal ways to start — it is neither equal nor a link, so it is its own
+             row. The input is hidden because the browser's own file control cannot be
+             styled to sit among the product's own buttons. -->
+        <div class="row wrap alt-route">
+          <span class="muted">Got a <code>.torrent</code> file instead?</span>
+          <button id="open-torrent" type="button">Open .torrent</button>
+          <input
+            id="torrent-file"
+            type="file"
+            accept=".torrent,application/x-bittorrent"
+            hidden
+          />
+        </div>
+      </div>
     </section>
 
     <section>
@@ -391,6 +424,20 @@
         browser's own extensions page — it is not in the stores yet, so there is
         nothing to search for.
       </p>
+    </section>
+
+    <section id="sites">
+      <h2>Sites it knows</h2>
+      <p class="muted" style="margin: 0 0 var(--space-5)">
+        Any direct link to a media file or a playlist works anywhere. These have
+        extractors of their own, so pasting a page link is enough — and the ones
+        marked need the extension, because a web page is not allowed to read
+        another site's page. The last few are link kinds rather than websites;
+        those marked need a helper running on your own machine. Services whose
+        media is DRM-protected are refused, in code, and so is any encrypted
+        stream anywhere.
+      </p>
+      <div id="site-list" class="sites"></div>
     </section>
 
     <footer>
