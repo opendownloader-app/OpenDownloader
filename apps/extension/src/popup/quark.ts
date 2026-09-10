@@ -24,11 +24,12 @@
 // one decision.
 
 import { formatSize, jobIdFor, putJob, loadCore } from "@opendownloader/engine";
+import { t } from "@opendownloader/ui";
 
 import { ext, openManagerTab } from "../platform/webext";
 
 const siteEl = document.getElementById("site-panel") as HTMLDivElement;
-const siteNameEl = document.getElementById("site-name") as HTMLSpanElement;
+const siteSupportedEl = document.getElementById("site-supported") as HTMLDivElement;
 const siteButton = document.getElementById("site-extract") as HTMLButtonElement;
 const siteStatus = document.getElementById("site-status") as HTMLDivElement;
 const siteOptions = document.getElementById("site-options") as HTMLDivElement;
@@ -624,7 +625,9 @@ export async function initQuarkPanel(
   };
 
   siteEl.hidden = false;
-  siteNameEl.textContent = "Quark";
+  siteSupportedEl.textContent = t("{site} is supported directly — read this page for its own list of qualities.", {
+    site: "Quark",
+  });
   siteStatus.textContent = "";
   siteOptions.replaceChildren();
 

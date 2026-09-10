@@ -57,6 +57,7 @@ import {
 
 import { reflectAccountState } from "./account-badge";
 import { mountTranscribePanel } from "./transcribe-panel";
+import { initPageLocale, languagePicker } from "@opendownloader/ui";
 
 // Test-only engine configuration, applied before anything can start a download.
 // Automation can click a button but cannot answer a native save dialog, so the
@@ -726,6 +727,13 @@ const manager = new Manager({
 
 const toolsRoot = document.getElementById("tools") as HTMLElement;
 mountTools({ root: toolsRoot, platform: webPlatform });
+
+// After the app has mounted, so the walk sees everything it built. The
+// marketing prose above the app is not in the catalogues yet and stays
+// English — `t()` falls back rather than showing a key, which is what
+// makes translating this page in tranches possible at all.
+initPageLocale();
+document.getElementById("language-slot")?.append(languagePicker());
 mountTranscribePanel(toolsRoot);
 
 void manager.start().then(() => mountRelaySettings());

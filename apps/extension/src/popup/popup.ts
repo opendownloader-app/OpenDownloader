@@ -19,13 +19,14 @@ import {
 
 import { ext, openManagerTab } from "../platform/webext";
 import type { PopupResponse } from "../shared/messages";
+import { initPageLocale, languagePicker, t } from "@opendownloader/ui";
 import { initQuarkPanel } from "./quark";
 import { initSitePanel } from "./site";
 
 const listEl = document.getElementById("list") as HTMLDivElement;
 const emptyEl = document.getElementById("empty") as HTMLDivElement;
 const permissionEl = document.getElementById("permission") as HTMLDivElement;
-const siteEl = document.getElementById("site") as HTMLSpanElement;
+const detectionOffEl = document.getElementById("detection-off") as HTMLDivElement;
 const grantBtn = document.getElementById("grant") as HTMLButtonElement;
 const openBtn = document.getElementById("open") as HTMLButtonElement;
 const clearBtn = document.getElementById("clear") as HTMLButtonElement;
@@ -422,7 +423,12 @@ async function refresh(): Promise<void> {
     const needed = [pattern, ...(await mediaHostPatterns(tab.url ?? ""))];
     const granted = await ext.permissions.contains({ origins: needed });
     permissionEl.hidden = granted;
-    siteEl.textContent = new URL(tab.url ?? "").hostname;
+    // One translatable sentence with the host substituted in, rather
+    // than three text nodes around two elements: "Detection is", "off"
+    // and "for" are not units that survive translation on their own.
+    detectionOffEl.textContent = t("Detection is off for {site}.", {
+      site: new URL(tab.url ?? "").hostname,
+    });
     if (!granted) {
       // Every other surface has to be cleared, not just left alone: a popup
       // opened on a granted site and then on an ungranted one would otherwise
@@ -500,5 +506,11 @@ clearBtn.addEventListener("click", () => {
     await refresh();
   })();
 });
+
+// Before the first render, so the popup never paints English and then
+// swaps — it is opened and torn down constantly, and a flash on every
+// open would be the most visible thing about it.
+initPageLocale();
+document.getElementById("language-slot")?.append(languagePicker());
 
 void refresh();

@@ -99,7 +99,8 @@
     <header>
       <div class="brand">
         <img src="icons/icon48.png" alt="" />
-        <h1>OpenDownloader</h1>
+        <h1 data-i18n-skip>OpenDownloader</h1>
+        <span id="language-slot"></span>
       </div>
       <p>
         Every feature is free. Nothing is uploaded, and detection stays off
@@ -108,10 +109,10 @@
     </header>
 
     <div id="site-panel" class="card stack" hidden>
-      <div class="headline">
-        <strong><span id="site-name"></span></strong> is supported directly —
-        read this page for its own list of qualities.
-      </div>
+      <!-- Same reason as #detection-off below: the site name is
+           interpolated, and "is supported directly" is not a unit that
+           survives translation apart from it. popup.ts fills {site}. -->
+      <div class="headline" id="site-supported" data-i18n-skip></div>
       <button id="site-extract" class="primary">
         See what this page offers
       </button>
@@ -120,10 +121,11 @@
     </div>
 
     <div id="permission" class="card stack" hidden>
-      <div>
-        Detection is <strong>off</strong> for
-        <span id="site" class="mono"></span>.
-      </div>
+      <!-- One sentence, not three text nodes around two elements. The
+           tree walker translates a text node at a time, and "Detection
+           is", "off" and "for" are not translatable units: word order
+           differs in all seven languages. popup.ts fills {site}. -->
+      <div id="detection-off" data-i18n-skip></div>
       <button id="grant" class="primary">Enable detection on this site</button>
     </div>
 

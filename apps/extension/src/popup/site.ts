@@ -36,11 +36,12 @@ import {
   type MediaOption,
   type VideoChoice,
 } from "@opendownloader/engine";
+import { t } from "@opendownloader/ui";
 
 import { ext, extensionPlatform, openManagerTab } from "../platform/webext";
 
 const siteEl = document.getElementById("site-panel") as HTMLDivElement;
-const siteNameEl = document.getElementById("site-name") as HTMLSpanElement;
+const siteSupportedEl = document.getElementById("site-supported") as HTMLDivElement;
 const siteButton = document.getElementById("site-extract") as HTMLButtonElement;
 const siteStatus = document.getElementById("site-status") as HTMLDivElement;
 const siteOptions = document.getElementById("site-options") as HTMLDivElement;
@@ -349,7 +350,9 @@ export async function initSitePanel(
   }
 
   siteEl.hidden = false;
-  siteNameEl.textContent = (await siteFor(url)) ?? "this site";
+  siteSupportedEl.textContent = t("{site} is supported directly — read this page for its own list of qualities.", {
+    site: (await siteFor(url)) ?? t("this site"),
+  });
   siteStatus.textContent = "";
   siteOptions.replaceChildren();
 
