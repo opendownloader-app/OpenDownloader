@@ -30,7 +30,14 @@ export {
   type ResolvedPlaylist,
   type RunOptions,
 } from "./engine";
-export { fetchWithRetry, looksLikeCorsFailure, type RetryOptions } from "./fetch-retry";
+export {
+  fetchWithRetry,
+  looksLikeCorsFailure,
+  FORBIDDEN_HEADERS,
+  HostRefusedRemainder,
+  NeedsForbiddenHeader,
+  type RetryOptions,
+} from "./fetch-retry";
 export { loadCore, type DlCore } from "./wasm";
 export {
   idbDelete,

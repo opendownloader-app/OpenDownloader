@@ -240,7 +240,15 @@ export class Queue {
         // A host that served the start and refused the rest will refuse it again at the
         // same offset, so this job has no resume to offer. Recorded here rather than
         // re-derived from the message in the UI.
-        terminal: !paused && (e as { name?: string }).name === "HostRefusedRemainder",
+        terminal:
+          !paused &&
+          ["HostRefusedRemainder", "NeedsForbiddenHeader"].includes(
+            (e as { name?: string }).name ?? "",
+          ),
+        // Retrying here cannot help either, but unlike the refusal above there *is*
+        // something the user can do, so the row says what.
+        needsExtension:
+          !paused && (e as { name?: string }).name === "NeedsForbiddenHeader",
       });
     } finally {
       // Taken down even if the download threw: a stale header rule would apply to

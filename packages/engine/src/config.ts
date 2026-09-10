@@ -21,6 +21,15 @@ export interface EngineConfig {
    */
   rewriteUrl: (url: string) => string;
   /**
+   * Whether this host can put a forbidden header on the wire.
+   *
+   * True in the extension, which sets them with `declarativeNetRequest`. False in a
+   * plain page, where the only route is a relay. Declared rather than inferred: the
+   * engine's other clue — whether the URL was rewritten — is false in the extension for
+   * the opposite reason, so inferring from it blames the wrong thing.
+   */
+  canSendForbiddenHeaders: boolean;
+  /**
    * Never open a File System Access sink, even where one is available.
    *
    * Set by the extension's E2E build. Automation can click a button but it
@@ -37,6 +46,7 @@ export interface EngineConfig {
 export const engineConfig: EngineConfig = {
   chunkSize: 8 * 1024 * 1024,
   rewriteUrl: (url) => url,
+  canSendForbiddenHeaders: false,
   forceBlobSink: false,
 };
 

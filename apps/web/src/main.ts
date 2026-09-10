@@ -720,6 +720,7 @@ void renderSupportedSites(document.getElementById("site-list"));
 const manager = new Manager({
   root: document.getElementById("manager") as HTMLElement,
   platform: webPlatform,
+  extensionUrl: RELEASES_URL,
   notice:
     "Downloads run in this tab. Closing it pauses them — progress is saved, and " +
     "coming back to this page resumes from where it stopped.",
@@ -1314,5 +1315,10 @@ if (__OPENDOWNLOADER_E2E__) {
   (globalThis as unknown as { __test: unknown }).__test = {
     remuxLocalSegments,
     extractMp4Audio,
+    // Lets a test point the page at a relay. The relay is the only way a page can send
+    // a header the Fetch standard forbids, so it is the difference between a bilibili
+    // download working and the CDN answering 403 — and that is worth being able to
+    // exercise without a person clicking through the settings panel.
+    updateSettings,
   };
 }

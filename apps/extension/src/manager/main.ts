@@ -38,6 +38,10 @@ import { extensionPlatform, onJobsChanged } from "../platform/webext";
 // chunks — the multi-chunk resume path is the one worth testing, and an 8 MiB
 // chunk would never reach it against a 512 KiB file. The blob sink is forced
 // because automation cannot answer a native save dialog.
+// The extension puts forbidden headers on the wire with `declarativeNetRequest`, so a
+// 403 here is the host's answer to a complete request — never a header we failed to send.
+configureEngine({ canSendForbiddenHeaders: true });
+
 if (__OPENDOWNLOADER_E2E__) {
   configureEngine({ chunkSize: 64 * 1024, forceBlobSink: true });
 }

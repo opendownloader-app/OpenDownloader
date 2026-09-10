@@ -162,6 +162,11 @@ export interface Job {
    * fails every YouTube download with a status that reads like an authorisation problem.
    */
   /**
+   * Set when the host demanded a header this page may not send. The extension can send
+   * it and this page cannot, so the UI offers that rather than a bare error.
+   */
+  needsExtension?: boolean;
+  /**
    * Set when the job failed in a way another attempt cannot get past — the host served
    * the beginning of the file and refused every later offset. A job marked this way is
    * offered no Start or Resume, because both reach the same refusal.

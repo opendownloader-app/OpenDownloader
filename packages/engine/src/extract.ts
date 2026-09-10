@@ -9,7 +9,7 @@
 // extractor stops finding what it expects; the error names the site so the failure is
 // legible instead of mysterious.
 
-import { fetchWithRetry } from "./fetch-retry";
+import { fetchWithRetry, FORBIDDEN_HEADERS } from "./fetch-retry";
 import type { ExtractedStream } from "./types";
 import { loadCore } from "./wasm";
 
@@ -395,13 +395,6 @@ const MAX_STEPS = 6;
  * the host instead — a silently dropped `Referer` looks exactly like a site that has
  * started refusing you.
  */
-const FORBIDDEN_HEADERS = new Set([
-  "origin",
-  "referer",
-  "cookie",
-  "host",
-  "user-agent",
-]);
 
 /**
  * Run a site's extractor to completion.

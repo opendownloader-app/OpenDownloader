@@ -70,6 +70,15 @@ export interface ManagerOptions {
    * bytes, and nothing could give them to it.
    */
   addTorrentFile?: (file: File) => Promise<void>;
+  /**
+   * Where to get the extension, for a host that is not it.
+   *
+   * A download can fail because the host demanded a header only the extension can send.
+   * The web app passes this so the row can offer the thing that works; the extension
+   * leaves it unset, because telling someone to install what they are already using is
+   * worse than saying nothing.
+   */
+  extensionUrl?: string;
 }
 
 /** Minimum gap between re-renders, so a fast download does not rebuild the list per chunk. */
@@ -798,6 +807,35 @@ export class Manager {
 
   private renderJobActions(job: Job, running: boolean): HTMLElement {
     const actions = el("div", { class: "row wrap" });
+
+    // The one failure with somewhere to go. Rendered as actions rather than folded into
+    // the error text, because "install the extension" and "open the page it is on" are
+    // both things to *do*, and a sentence describing them is not.
+    if (job.needsExtension) {
+      const routes = el("div", { class: "row wrap" });
+      if (this.options.extensionUrl) {
+        routes.append(
+          el("a", {
+            class: "primary",
+            href: this.options.extensionUrl,
+            target: "_blank",
+            rel: "noopener",
+            text: "Get the extension",
+          }),
+        );
+      }
+      if (job.pageUrl) {
+        routes.append(
+          el("a", {
+            href: job.pageUrl,
+            target: "_blank",
+            rel: "noopener",
+            text: "Open the video's page",
+          }),
+        );
+      }
+      if (routes.childElementCount > 0) actions.append(routes);
+    }
 
     // A job the host will refuse again at the same offset has nothing to start or
     // resume. It kept its Resume button, which read as "this nearly worked, press again"

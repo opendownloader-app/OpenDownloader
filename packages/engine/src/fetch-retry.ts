@@ -66,6 +66,45 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 /** Status codes worth trying again. */
 /**
+ * Headers the Fetch standard forbids script from setting.
+ *
+ * Several of these CDNs answer 403 without one — bilibili's checks `User-Agent` — so the
+ * only ways to send them are a relay that re-issues the request, or the extension's
+ * `declarativeNetRequest`. Exported because both the extraction and download paths have
+ * to make the same judgement about them.
+ */
+export const FORBIDDEN_HEADERS = new Set([
+  "user-agent",
+  "referer",
+  "origin",
+  "cookie",
+  "host",
+]);
+
+/**
+ * The host demanded a header this page is not allowed to send, and nothing could send it.
+ *
+ * Distinct from a plain 403 because the answer is specific and actionable: the extension
+ * sets these headers through `declarativeNetRequest`, and the desktop app's relay
+ * re-issues the request carrying them. A page on its own can do neither, so saying
+ * "403" alone sends people to look at the link, the site, or their network — none of
+ * which is the problem.
+ */
+export class NeedsForbiddenHeader extends Error {
+  constructor(
+    readonly host: string,
+    readonly headers: string[],
+  ) {
+    super(
+      `${host} refused this request because it wants a ${headers.join(" and ")} header, ` +
+        "which a web page is not allowed to send. The browser extension sets it, and so " +
+        "does the OpenDownloader app when it is running — this page by itself cannot.",
+    );
+    this.name = "NeedsForbiddenHeader";
+  }
+}
+
+/**
  * The host served the start of a file and then refused every later offset.
  *
  * Carried as its own type rather than recognised by its message, because the caller acts
@@ -158,6 +197,31 @@ export async function fetchWithRetry(
   // than wrapping fetch, so retry, range and abort behaviour stay identical.
   const target = engineConfig.rewriteUrl(url);
 
+  // Headers a page may not set, handed to the relay to send on its behalf.
+  //
+  // Only when the URL was actually rewritten — that is the signal a relay is carrying
+  // this request. The extension sets these through `declarativeNetRequest` and fetches
+  // the host directly, and adding `x-relay-*` there would turn a simple request into a
+  // preflighted one against a CDN that has never heard of the header.
+  //
+  // Without this the download path dropped them silently: `fetch` discards a
+  // `User-Agent`, and bilibili's CDN answers 403 to a request that has none. Extraction
+  // already did this conversion, which is why a Bilibili link could be *read* in the web
+  // app and then failed the moment it was downloaded.
+  const headers = { ...(options.headers ?? {}) };
+  if (target !== url) {
+    for (const name of Object.keys(headers)) {
+      if (!FORBIDDEN_HEADERS.has(name.toLowerCase())) continue;
+      headers[`x-relay-${name.toLowerCase()}`] = headers[name]!;
+      delete headers[name];
+    }
+  }
+  /** Forbidden headers this request needs but has no way to deliver. */
+  const undeliverable =
+    target === url && !engineConfig.canSendForbiddenHeaders
+      ? Object.keys(headers).filter((n) => FORBIDDEN_HEADERS.has(n.toLowerCase()))
+      : [];
+
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (options.signal?.aborted) {
       throw new DOMException("aborted", "AbortError");
@@ -166,7 +230,7 @@ export async function fetchWithRetry(
     try {
       const res = await fetch(target, {
         method: options.method ?? "GET",
-        headers: options.headers,
+        headers,
         body: options.body,
         signal: options.signal,
       });
@@ -217,6 +281,13 @@ export async function fetchWithRetry(
         "connection changes it, and retrying will reach the same point again.",
     );
   }
+  // A 403 from a host that wanted a header this page could not send. Checked after the
+  // throttle case above, which is a different 403 — that one is served *part way* on a
+  // request whose headers did arrive.
+  if (undeliverable.length > 0 && detail.includes("403")) {
+    throw new NeedsForbiddenHeader(new URL(target).hostname, undeliverable);
+  }
+
   // A CORS-shaped failure is rethrown as the `TypeError` it was, not wrapped.
   //
   // Wrapping it in a plain `Error` is what made every downstream
