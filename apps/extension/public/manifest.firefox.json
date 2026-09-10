@@ -24,7 +24,7 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "opendownloader@openapps.sg",
+      "id": "opendownloader@opendownloader.app",
       "strict_min_version": "115.0"
     }
   },
