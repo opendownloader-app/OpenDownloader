@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "OpenDownloader — 웹 동영상 저장",
+    "description": "Extension name shown in the browser and the store listing."
+  },
+  "extDescription": {
+    "message": "웹 페이지의 동영상, 오디오, 파일을 저장합니다. 이어받기, 검증, 변환을 지원합니다. 완전 무료 오픈 소스이며 아무것도 업로드하지 않습니다.",
+    "description": "Store listing description."
+  }
+}

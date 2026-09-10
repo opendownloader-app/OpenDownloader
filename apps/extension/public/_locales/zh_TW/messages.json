@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "OpenDownloader — 網頁影片儲存",
+    "description": "Extension name shown in the browser and the store listing."
+  },
+  "extDescription": {
+    "message": "將網頁中的影片、音訊和檔案儲存到電腦。支援續傳、校驗與轉換。完全免費開源，不上傳任何內容。",
+    "description": "Store listing description."
+  }
+}
