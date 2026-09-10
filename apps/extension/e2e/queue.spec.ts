@@ -163,3 +163,54 @@ test("pause all stops the queue, and resume all restarts it", async ({ manager, 
     expect(job.status).toBe("done");
   }
 });
+
+test("a host that serves the start and refuses the rest leaves nothing to resume", async ({
+  manager,
+  serverUrl,
+}) => {
+  // The shape reported in APP-60: Google's media addresses serve to about 1.1 MB and
+  // answer 403 for every later offset. The download cannot be completed, and — the part
+  // that was wrong — it cannot be resumed either, because the next attempt is refused at
+  // the identical offset.
+  const size = 4 * 1024 * 1024;
+  const servable = 1_163_264;
+  const id = "refused-remainder";
+
+  await manager.evaluate(
+    async (seed) => {
+      await (globalThis as any).__test.putJob({
+        id: seed.id,
+        url: seed.url,
+        filename: "refused.mp4",
+        kind: "progressive",
+        status: "queued",
+        stateJson: "",
+        totalBytes: seed.size,
+        receivedBytes: 0,
+        outputBytes: 0,
+        sha256: null,
+        error: null,
+        createdAt: Date.now(),
+        order: Date.now(),
+        expectedSha256: null,
+        verification: "unverified",
+        // A host that states a request size is one that throttles with 403 rather than
+        // refusing outright, and that is what makes its refusal the terminal case.
+        maxChunkBytes: 1024 * 1024,
+      });
+      await (globalThis as any).__test.manager.sync();
+    },
+    { id, url: `${serverUrl}/fixture.mp4?size=${size}&serve_to=${servable}`, size },
+  );
+
+  const job = await waitForStatus(manager, id, ["done", "error"]);
+  expect(job.status).toBe("error");
+  expect(job.error).toContain("refused the rest");
+  // Recorded on the job rather than re-derived from the message by whoever draws it.
+  expect(job.terminal).toBe(true);
+
+  // And the row offers no way to try again, because there is none.
+  const card = manager.locator(".card").filter({ hasText: "refused.mp4" });
+  await expect(card.getByRole("button", { name: /^(Resume|Start)$/ })).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Remove" })).toBeVisible();
+});

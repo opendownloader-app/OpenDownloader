@@ -237,6 +237,10 @@ export class Queue {
       await updateJob(job.id, {
         status: paused ? "paused" : "error",
         error: paused ? null : describe(e),
+        // A host that served the start and refused the rest will refuse it again at the
+        // same offset, so this job has no resume to offer. Recorded here rather than
+        // re-derived from the message in the UI.
+        terminal: !paused && (e as { name?: string }).name === "HostRefusedRemainder",
       });
     } finally {
       // Taken down even if the download threw: a stale header rule would apply to

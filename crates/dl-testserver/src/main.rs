@@ -344,6 +344,9 @@ fn route(out: &mut TcpStream, req: &Request, counters: &Counters) -> std::io::Re
 /// - `flip=1`   change the ETag after the first request, so a resume must be rejected
 /// - `fail=K`   answer 503 with `Retry-After: 1` for the first K requests
 /// - `truncate=1` promise the full length but send half and hang up
+/// - `serve_to=N` answer `206` for a range starting below N and `403` for any range at
+///   or beyond it, which is what Google's media addresses do — they serve to about
+///   1.1 MB and refuse the rest, whatever the range size or the order asked in
 fn serve_fixture(
     out: &mut TcpStream,
     req: &Request,
@@ -393,6 +396,16 @@ fn serve_fixture(
     }
 
     let (start, end) = range.expect("checked above");
+
+    // A host that serves the beginning of a file and refuses every later offset. Real
+    // enough to matter: it is the shape a download hits on Google's media addresses, and
+    // the engine has to end such a job without offering to resume it.
+    if let Some(limit) = req.query.get("serve_to").and_then(|v| v.parse().ok()) {
+        if start >= limit {
+            return send(out, 403, "text/plain", &[], b"forbidden");
+        }
+    }
+
     let slice = &body[start..=end];
     let content_range = format!("bytes {start}-{end}/{size}");
     let headers = vec![

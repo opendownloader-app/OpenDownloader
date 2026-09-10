@@ -799,7 +799,10 @@ export class Manager {
   private renderJobActions(job: Job, running: boolean): HTMLElement {
     const actions = el("div", { class: "row wrap" });
 
-    if (job.status !== "done") {
+    // A job the host will refuse again at the same offset has nothing to start or
+    // resume. It kept its Resume button, which read as "this nearly worked, press again"
+    // and reached the identical refusal every time — the state reported in APP-60.
+    if (job.status !== "done" && !job.terminal) {
       if (running) {
         actions.append(
           el("button", {

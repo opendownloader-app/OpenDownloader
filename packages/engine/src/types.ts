@@ -161,6 +161,12 @@ export interface Job {
    * answer 403 to any range above 1 MiB, so an engine using its ordinary 8 MiB chunk
    * fails every YouTube download with a status that reads like an authorisation problem.
    */
+  /**
+   * Set when the job failed in a way another attempt cannot get past — the host served
+   * the beginning of the file and refused every later offset. A job marked this way is
+   * offered no Start or Resume, because both reach the same refusal.
+   */
+  terminal?: boolean;
   maxChunkBytes?: number;
 }
 

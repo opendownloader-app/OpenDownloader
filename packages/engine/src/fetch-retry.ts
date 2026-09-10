@@ -65,6 +65,22 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /** Status codes worth trying again. */
+/**
+ * The host served the start of a file and then refused every later offset.
+ *
+ * Carried as its own type rather than recognised by its message, because the caller acts
+ * on it: a download that ends this way cannot be resumed — the next attempt reaches the
+ * same offset and is refused there too — so offering "Resume" on it is offering an action
+ * that provably cannot succeed. Measured on Google's media addresses, which serve to
+ * about 1.1 MB and refuse the rest.
+ */
+export class HostRefusedRemainder extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HostRefusedRemainder";
+  }
+}
+
 function isRetryableStatus(
   status: number,
   retryForbidden = false,
@@ -193,12 +209,12 @@ export async function fetchWithRetry(
   // A run of 403s from a host that throttles is worth naming, because the status alone
   // sends people looking for a permissions problem that is not there.
   if (options.retryForbidden && detail.includes("403")) {
-    throw new Error(
+    throw new HostRefusedRemainder(
       `${new URL(target).hostname} served the beginning of this file and refused the ` +
-        "rest. YouTube now limits these addresses to roughly their first two megabytes " +
-        "and delivers the remainder over a different protocol, so the part that is " +
-        "missing cannot be fetched this way. Nothing about the link, the permissions or " +
-        "the connection changes it, and retrying will reach the same point again.",
+        "rest. YouTube now limits these addresses to about their first megabyte and " +
+        "delivers the remainder over a different protocol, so the part that is missing " +
+        "cannot be fetched this way. Nothing about the link, the permissions or the " +
+        "connection changes it, and retrying will reach the same point again.",
     );
   }
   // A CORS-shaped failure is rethrown as the `TypeError` it was, not wrapped.
