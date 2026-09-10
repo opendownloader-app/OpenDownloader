@@ -245,6 +245,16 @@ function renderOptions(extraction: Extraction, pageUrl: string): void {
   siteStatus.className = "muted";
   siteStatus.textContent = extraction.title;
 
+  // Why the best entry below may be lower than the site's own player offers. The web
+  // app has shown this since it was added; the popup did not, so the one surface where
+  // a signed-in viewer would expect their own renditions explained nothing at all.
+  if (extraction.note) {
+    const note = document.createElement("p");
+    note.className = "muted hint warn";
+    note.textContent = extraction.note;
+    siteOptions.append(note);
+  }
+
   const name = stem(extraction.title);
   // The flagged one, not the first: "best" means best *deliverable*, and the largest
   // rendition is routinely one that cannot be given sound. Taking `[0]` here is how the
