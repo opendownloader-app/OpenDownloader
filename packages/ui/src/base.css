@@ -43,7 +43,7 @@
     --text-strong: var(--white);
     --text-body: var(--gray-200);
     --text-muted: var(--gray-400);
-    --text-faint: var(--gray-500);
+    --text-faint: color-mix(in oklab, var(--gray-500) 30%, var(--gray-600));
     --text-inverse: var(--color-font);
     --text-brand: var(--green);
     --text-link: var(--white);
