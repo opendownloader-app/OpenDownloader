@@ -275,9 +275,9 @@ export async function fetchWithRetry(
   if (options.retryForbidden && detail.includes("403")) {
     throw new HostRefusedRemainder(
       `${new URL(target).hostname} served the beginning of this file and refused the ` +
-        "rest. YouTube now limits these addresses to about their first megabyte and " +
-        "delivers the remainder over a different protocol, so the part that is missing " +
-        "cannot be fetched this way. Nothing about the link, the permissions or the " +
+        "rest. YouTube allows about the first minute of a video to be fetched this way " +
+        "and delivers the remainder over a protocol this cannot speak, so anything " +
+        "longer stops part-way. Nothing about the link, the permissions or the " +
         "connection changes it, and retrying will reach the same point again.",
     );
   }

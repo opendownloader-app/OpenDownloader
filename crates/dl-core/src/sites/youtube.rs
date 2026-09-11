@@ -41,12 +41,24 @@ use super::{
 /// engine's ordinary chunk — is answered `403`, which reads like an authorisation
 /// failure rather than a size complaint and is worth knowing before debugging it.
 ///
-/// # The wall past the first couple of megabytes
+/// # The wall is about a minute of media, not a number of bytes
 ///
-/// These URLs serve **only their first ~2 MiB**. Offsets 0 and 1 MiB answer `206`; 5, 10,
-/// 15, 25 and 30 MiB all answer `403`, on a freshly issued URL, at a 64 KiB read size,
-/// with the highest offset requested *first* so that neither request count nor bytes
-/// already transferred can explain it. It is a property of the offset and nothing else.
+/// These URLs serve roughly **the first 60 seconds** of a stream and answer `403` past
+/// it. Offsets below the cut answer `206`; offsets beyond it answer `403` on a freshly
+/// issued URL, at a 64 KiB read, with the highest offset requested *first*, so neither
+/// request count nor bytes already transferred explains it.
+///
+/// **An earlier version of this note called it a ~1.1 MB wall, and that was wrong.**
+/// The figure came from binary-searching one 130 kbps AAC audio stream, where a minute
+/// happens to be about 970 KB — so the measurement was right and the *unit* was not.
+/// APP-77 measured five videos and settled it: audio failed at 970,927 and 971,653 bytes
+/// (~60 s at that bitrate) while a 4K video ran to 66,748,447 bytes before failing
+/// (~58.6 s of a 722.7 MB, 635 s file). Same seconds, wildly different byte counts. It
+/// tracks the duration served, which is consistent with YouTube admitting only about a
+/// minute to a request carrying no PO Token.
+///
+/// Not every video trips it — a 213 s clip downloaded whole — so it presents to users as
+/// intermittent, which is why the error text has to describe the limit rather than a size.
 ///
 /// An earlier version of this note recorded the same measurement from a datacenter IP and
 /// concluded it was Google declining to serve bulk media to datacenters, adding that "a
@@ -588,7 +600,7 @@ fn parse_player_response(root: &Value, id: Option<&str>) -> Result<Extraction, S
     options.sort_by_key(|o| core::cmp::Reverse(o.rank));
 
     let mut extraction = Extraction {
-        note: None,
+        note: over_the_minute_note(duration_ms),
         site: "YouTube".into(),
         title,
         options,
@@ -600,6 +612,36 @@ fn parse_player_response(root: &Value, id: Option<&str>) -> Result<Extraction, S
     // "best" cannot come to mean two things — see [`Extraction::rank_choices`].
     extraction.rank_choices();
     Ok(extraction)
+}
+
+/// Say up front that a long video will stop part-way.
+///
+/// The duration is in hand before anything is fetched, and the limit is measured in
+/// seconds (see the module header), so this is answerable at extraction time rather than
+/// after a user has watched a progress bar climb and fail. `SERVED_SECONDS` is the
+/// conservative end of what APP-77 observed — failures landed at 58.6-60 s across four
+/// videos — so a clip just under it is not warned about needlessly.
+fn over_the_minute_note(duration_ms: Option<u64>) -> Option<String> {
+    const SERVED_SECONDS: u64 = 60;
+    let seconds = duration_ms? / 1000;
+    (seconds > SERVED_SECONDS).then(|| {
+        format!(
+            "This video is {} and YouTube allows only about the first minute to be \
+             fetched this way, so the download will stop part-way. Shorter videos \
+             complete normally.",
+            human_duration(seconds)
+        )
+    })
+}
+
+/// `4:23`, or `1:12:05` once there is an hour to show.
+fn human_duration(seconds: u64) -> String {
+    let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
 }
 
 fn audio_only_option(
