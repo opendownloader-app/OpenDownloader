@@ -344,6 +344,9 @@ fn route(out: &mut TcpStream, req: &Request, counters: &Counters) -> std::io::Re
 /// - `flip=1`   change the ETag after the first request, so a resume must be rejected
 /// - `fail=K`   answer 503 with `Retry-After: 1` for the first K requests
 /// - `truncate=1` promise the full length but send half and hang up
+/// - `truncate_first=K` do that to the first K responses only, then serve normally —
+///   which is the shape a reader has to survive: a connection cut part-way that
+///   succeeds when the missing tail is asked for again
 /// - `serve_to=N` answer `206` for a range starting below N and `403` for any range at
 ///   or beyond it, which is what Google's media addresses do — they serve to about
 ///   1.1 MB and refuse the rest, whatever the range size or the order asked in
@@ -377,7 +380,11 @@ fn serve_fixture(
         "\"v1\""
     };
 
-    let truncate = req.query.get("truncate").map(String::as_str) == Some("1");
+    // Always, or only for the opening responses. The second form is what a flaky CDN
+    // looks like: the retry is expected to succeed, so a reader that resumes finishes
+    // and one that treats a short read as fatal does not.
+    let truncate = req.query.get("truncate").map(String::as_str) == Some("1")
+        || hits < usize_param(req, "truncate_first", 0);
     let range = req.headers.get("range").and_then(|r| parse_range(r, size));
 
     // `If-Range` that no longer matches means the client must be given the whole

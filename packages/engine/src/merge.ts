@@ -37,6 +37,11 @@ import { loadCore } from "./wasm";
  */
 const HEAD_BYTES = 256 * 1024;
 
+/** How many times to ask again for the tail of a span the host cut short. */
+const MAX_RESUMES = 5;
+/** Multiplied by the attempt number, so a flapping connection is not hammered. */
+const RESUME_BACKOFF_MS = 400;
+
 export interface MergeOptions {
   onProgress: (p: Progress) => void;
   signal?: AbortSignal;
@@ -108,22 +113,65 @@ async function readOnce(
   if (stream.segments) {
     return readFromSegments(stream, start, length, signal);
   }
-  const res = await fetchWithRetry(stream.url, {
-    headers: {
-      ...headersOf(stream),
-      Range: `bytes=${start}-${start + length - 1}`,
-    },
-    signal,
-    // A host that states a request size is one that throttles, and its 403 means "slow
-    // down" rather than "no".
-    retryForbidden: stream.max_chunk !== null,
-  });
-  if (!res.ok && res.status !== 206) {
-    throw new Error(
-      `stream answered ${res.status} for bytes ${start}-${start + length - 1}`,
-    );
+  // A range can come back short: the headers promise the whole span and the connection
+  // is cut part-way through the body. Bilibili's CDN does this at random offsets on a
+  // long video, and the more chunks a file has the likelier one is unlucky. Treating it
+  // as fatal threw away a download that was one more request from finishing, so this
+  // asks for the remainder from where it stopped.
+  const out = new Uint8Array(length);
+  let got = 0;
+  let attempts = 0;
+
+  while (got < length) {
+    abortIf(signal);
+    const from = start + got;
+    let chunk: Uint8Array;
+    try {
+      const res = await fetchWithRetry(stream.url, {
+        headers: {
+          ...headersOf(stream),
+          Range: `bytes=${from}-${start + length - 1}`,
+        },
+        signal,
+        // A host that states a request size is one that throttles, and its 403 means
+        // "slow down" rather than "no".
+        retryForbidden: stream.max_chunk !== null,
+      });
+      if (!res.ok && res.status !== 206) {
+        throw new Error(
+          `stream answered ${res.status} for bytes ${from}-${start + length - 1}`,
+        );
+      }
+      chunk = new Uint8Array(await res.arrayBuffer());
+    } catch (e) {
+      // A dropped connection surfaces as a `TypeError`, the same shape as a CORS
+      // refusal — so `fetchWithRetry` abandons it rather than waiting. Once part of
+      // this span has already arrived that ambiguity is gone: the host answered us, so
+      // the failure is the network and waiting is the right response.
+      if ((e as { name?: string }).name === "AbortError") throw e;
+      if (got === 0 || attempts >= MAX_RESUMES) throw e;
+      attempts += 1;
+      await new Promise((r) => setTimeout(r, RESUME_BACKOFF_MS * attempts));
+      continue;
+    }
+
+    if (chunk.length === 0) {
+      // No progress; an identical request would do the same thing.
+      if (attempts >= MAX_RESUMES) break;
+      attempts += 1;
+      await new Promise((r) => setTimeout(r, RESUME_BACKOFF_MS * attempts));
+      continue;
+    }
+
+    // A server that ignores `Range` answers 200 with the whole resource: take only the
+    // part still wanted rather than running off the end of the buffer.
+    const take = Math.min(chunk.length, length - got);
+    out.set(chunk.subarray(0, take), got);
+    got += take;
+    attempts = 0;
   }
-  return new Uint8Array(await res.arrayBuffer());
+
+  return out.subarray(0, got);
 }
 
 /**
@@ -449,9 +497,14 @@ export async function runMerge(
     const stream = read.source === "Video" ? video : audio;
     const bytes = await readRange(stream, read.offset, read.len, opts.signal);
     if (bytes.length !== read.len) {
+      // Only reached once `readOnce` has asked again for the missing tail and still come
+      // up short, so this is the host refusing to finish the span — not evidence the
+      // file changed. Saying it "changed on the server" sent people looking for a
+      // re-encode that never happened; a stale resource is caught by `If-Range`.
       throw new Error(
-        `stream returned ${bytes.length} bytes where ${read.len} were asked for; ` +
-          "the file changed on the server",
+        `${new URL(stream.url).hostname} stopped sending part-way through and did not ` +
+          `resume: ${bytes.length} of ${read.len} bytes arrived. This is usually the ` +
+          "connection rather than the file.",
       );
     }
 
