@@ -72,6 +72,97 @@ const statusEl = document.getElementById("url-status") as HTMLParagraphElement;
 // The bar above the status line, and the schedule of what to say while it sweeps. The
 // paragraph is passed in rather than created, because everything on this page already
 // writes its result there.
+/**
+ * The extension's own id, fixed by the `key` in its manifest.
+ *
+ * Stable across every install, which is what makes the ping below possible at all — an
+ * unpacked extension without that key takes an id derived from its load path.
+ */
+const EXTENSION_ID = "cbeecjhjblfbdjncacbfmlcelgkmklda";
+
+/**
+ * Is the extension installed in this browser?
+ *
+ * There is no API for "is extension X installed", and the usual dodge — fetching a
+ * web-accessible resource and seeing whether it loads — answers the question for every
+ * site that tries it. The supported route is the other way round: the extension names
+ * this origin in `externally_connectable`, which makes `chrome.runtime` appear on this
+ * page and nowhere else, and answers a ping. A browser without it gives no object at
+ * all, so absence is indistinguishable from not-Chromium — which is fine, because both
+ * lead to the same advice.
+ *
+ * Resolves false rather than rejecting: this runs on a failure path, and a detection
+ * that throws would replace a useful message with a worse one.
+ */
+async function extensionInstalled(): Promise<boolean> {
+  const runtime = (globalThis as { chrome?: { runtime?: Record<string, unknown> } })
+    .chrome?.runtime as
+    | {
+        sendMessage?: (
+          id: string,
+          m: unknown,
+          cb: (r: { ok?: boolean } | undefined) => void,
+        ) => void;
+        lastError?: unknown;
+      }
+    | undefined;
+  if (!runtime?.sendMessage) return false;
+  return new Promise((resolve) => {
+    // Firefox and an uninstalled extension both simply never call back.
+    const giveUp = setTimeout(() => resolve(false), 600);
+    try {
+      runtime.sendMessage!(EXTENSION_ID, { type: "ping" }, (reply) => {
+        clearTimeout(giveUp);
+        // Reading `lastError` is what stops Chrome logging "Unchecked runtime.lastError"
+        // to the console when nothing answered. It is a read for its side effect.
+        void runtime.lastError;
+        resolve(Boolean(reply?.ok));
+      });
+    } catch {
+      clearTimeout(giveUp);
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * Say why this page cannot do it, and offer the thing that can.
+ *
+ * Two different failures land here — a site that only its own pages may read, and one
+ * that refuses this origin outright — and both have the same answer, so both get the
+ * same panel rather than one useful message and one shrug. Which half of the panel is
+ * shown depends on whether the extension is actually there, because "install it" and
+ * "you already have it, open the video" are different instructions and guessing wrong
+ * wastes the reader's time either way.
+ */
+async function offerTheExtension(message: string, pageUrl: string): Promise<void> {
+  statusEl.className = "status-error";
+  statusEl.replaceChildren(document.createTextNode(message + " "));
+
+  const installed = await extensionInstalled();
+  const action = document.createElement("a");
+  action.rel = "noopener";
+  if (installed) {
+    // Opening the video is the whole of what this page can usefully do: the extension
+    // reads the page you are on, so it has to be on that page. It cannot be opened from
+    // here — a toolbar popup has no API a website may call.
+    action.href = pageUrl;
+    action.target = "_blank";
+    action.textContent = "Open the video and click the OpenDownloader icon";
+    statusEl.append(
+      document.createTextNode(
+        "You already have the extension, and it is not subject to any of this. ",
+      ),
+      action,
+    );
+  } else {
+    action.href = RELEASES_URL;
+    action.target = "_blank";
+    action.textContent = "Get the extension";
+    statusEl.append(action);
+  }
+}
+
 /** Where every build is published. The only address the app points people at. */
 const RELEASES_URL =
   "https://github.com/opendownloader-app/opendownloader/releases";
@@ -1173,17 +1264,9 @@ async function add(): Promise<void> {
     statusEl.className = "status-error";
     const message = e instanceof Error ? e.message : String(e);
 
-    // The one refusal with somewhere to send you. Rendered with the store links rather
-    // than a sentence describing them.
+    // The one refusal with somewhere to send you.
     if (e instanceof SiteNeedsExtension) {
-      // One link to the builds, not three to store front pages. Nothing has been
-      // submitted to a store, so those sent people to a search box for a listing that
-      // does not exist.
-      const link = document.createElement("a");
-      link.href = RELEASES_URL;
-      link.rel = "noopener";
-      link.textContent = "Get the extension";
-      statusEl.replaceChildren(document.createTextNode(message + " "), link);
+      void offerTheExtension(message, typed);
       return;
     }
     // Two shapes of the same problem: the site answered 403, or the browser refused to
@@ -1194,17 +1277,19 @@ async function add(): Promise<void> {
       !relay.enabled &&
       (/\b403\b|refused this request/.test(message) || looksLikeCorsFailure(e))
     ) {
-      statusEl.textContent = CAN_REACH_LOOPBACK
-        ? "That site will not answer a web page directly — it refuses every origin but " +
-          "its own. The relay gets around it: install the OpenDownloader app, leave it " +
-          "running, and this page will find it on reload. The browser extension is never " +
-          "subject to this at all."
-        : "That site will not answer a web page directly — it refuses every origin but " +
-          "its own. The relay that gets around it runs on your machine, and this page " +
-          "is served over https, which is not allowed to talk to a service there — so " +
-          "running one will not help this page. Use the browser extension, which is " +
-          "never subject to any of this, or open the OpenDownloader app, which has this " +
-          "same page inside it.";
+      // Same panel as above: this is the same problem wearing a different error, and it
+      // used to end in a paragraph naming two things to go and find. Now it says which
+      // of them applies to this browser.
+      void offerTheExtension(
+        CAN_REACH_LOOPBACK
+          ? "That site will not answer a web page directly — it refuses every origin but " +
+              "its own. The relay gets around it: install the OpenDownloader app, leave " +
+              "it running, and this page will find it on reload."
+          : "That site will not answer a web page directly — it refuses every origin but " +
+              "its own, and a page served over https may not talk to a relay on your own " +
+              "machine — so running one will not help this page.",
+        typed,
+      );
       return;
     }
     statusEl.textContent = looksLikeCorsFailure(e)

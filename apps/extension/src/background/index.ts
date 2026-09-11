@@ -23,6 +23,29 @@ ext.runtime.onMessage.addListener(
   },
 );
 
+// The one thing the website is allowed to ask: "are you there?"
+//
+// `externally_connectable` in the manifest limits this to opendownloader.app and its app
+// subdomain; every other page has no `chrome.runtime` to call with. The reply carries no
+// data about the user or their tabs — only that an extension of this version answered —
+// because the question being asked is solely whether the page should offer an install
+// link or a hand-off.
+//
+// The page cannot learn this any other way. There is no API for "is extension X
+// installed", and probing for a web-accessible resource leaks the answer to every site
+// that tries it. Declaring the origins keeps the answer to the one page entitled to it.
+ext.runtime.onMessageExternal?.addListener(
+  (
+    message: { type?: string },
+    _sender,
+    sendResponse: (r: { ok: true; version: string }) => void,
+  ) => {
+    if (message?.type !== "ping") return false;
+    sendResponse({ ok: true, version: ext.runtime.getManifest().version });
+    return false;
+  },
+);
+
 async function handle(message: PopupRequest): Promise<PopupResponse> {
   switch (message.action) {
     case "listCandidates":
