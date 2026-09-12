@@ -1,0 +1,152 @@
+# Every downloadable thing OpenDownloader ships, built and attached to a release.
+#
+# There are two ways to run it and neither needs a terminal:
+#
+#   - Push a tag beginning with `v` (`v0.2.0-rc.1`, `v0.2.0`).
+#   - Or open Actions → Release → "Run workflow" on GitHub, type the version, and press
+#     the button. That path creates the tag itself, so a release can be cut from a phone.
+#
+# A tag containing a hyphen is a release candidate and is marked pre-release, so it never
+# becomes the "Latest" download the site links to. `v0.2.0` does.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, with the leading v (e.g. v0.2.0 or v0.2.0-rc.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  # The wasm-bindgen CLI and the wasm-bindgen crate must match exactly or glue
+  # generation fails on a schema mismatch. Pinned `=0.2.126` in Cargo.toml.
+  WASM_BINDGEN_VERSION: "0.2.126"
+
+jobs:
+  # The version is resolved once, so the tag push and the button agree on it.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      prerelease: ${{ steps.pick.outputs.prerelease }}
+    steps:
+      - id: pick
+        run: |
+          TAG="${{ inputs.version || github.ref_name }}"
+          case "$TAG" in
+            v*) ;;
+            *) echo "::error::version must start with v — got '$TAG'"; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # The hyphen is what separates a candidate from a release, here and in the
+          # store-publish gate. `v0.2.0-rc.1` has one; `v0.2.0` does not.
+          case "$TAG" in
+            *-*) echo "prerelease=true"  >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  extensions:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version ${{ env.WASM_BINDGEN_VERSION }} --locked
+      - run: npm ci
+      - run: npm run build:wasm
+
+      # Two builds from one tree. They differ in the manifest (MV3 background model,
+      # permission key names, gecko settings) — see scripts/copy-static.mjs.
+      - run: npm run build:extension
+      - run: npm run build:extension:firefox
+
+      - name: Package
+        run: |
+          V="${{ needs.version.outputs.tag }}"
+          mkdir -p out
+          # Zipped from inside the build directory: a browser expects manifest.json at
+          # the root of the archive, not nested under a folder it has to be told about.
+          (cd apps/extension/dist         && zip -qr "$GITHUB_WORKSPACE/out/opendownloader-chrome-$V.zip" .)
+          (cd apps/extension/dist-firefox && zip -qr "$GITHUB_WORKSPACE/out/opendownloader-firefox-$V.zip" .)
+          ls -lh out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extensions
+          path: out/*.zip
+
+  macos-app:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version ${{ env.WASM_BINDGEN_VERSION }} --locked
+      - run: npm ci
+      - run: npm run build:wasm
+      - name: Build the app
+        run: bash scripts/build-app.sh
+      - name: Package
+        run: |
+          V="${{ needs.version.outputs.tag }}"
+          mkdir -p out
+          # `ditto` rather than `zip`: it preserves the bundle's symlinks and resource
+          # forks, which a plain zip flattens into an app macOS then refuses to open.
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist-app/OpenDownloader.app "out/OpenDownloader-macOS-$V.zip"
+          ls -lh out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: out/*.zip
+
+  publish:
+    needs: [version, extensions, macos-app]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Attach everything to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          find artifacts -name '*.zip' -exec mv {} . \;
+          ls -lh ./*.zip
+
+          FLAG=""
+          [ "$PRERELEASE" = "true" ] && FLAG="--prerelease"
+
+          # Created if it does not exist, updated if it does — so re-running after a
+          # failed build replaces the assets instead of erroring on a taken tag.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" ./*.zip --clobber
+          else
+            gh release create "$TAG" ./*.zip $FLAG \
+              --title "OpenDownloader $TAG" \
+              --notes-file .github/release-notes.md
+          fi
